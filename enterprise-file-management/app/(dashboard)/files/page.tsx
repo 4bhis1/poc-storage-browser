@@ -1,0 +1,44 @@
+"use client"
+
+import * as React from "react"
+import { SidebarTrigger } from "@/components/ui/sidebar"
+import { Separator } from "@/components/ui/separator"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
+import { FileBrowser } from "@/components/file-browser"
+import { FileUploadDialog } from "@/components/file-upload-dialog"
+import { SearchCommandDialog } from "@/components/search-command"
+
+export default function FilesPage() {
+  const [uploadOpen, setUploadOpen] = React.useState(false)
+
+  return (
+    <>
+      <SearchCommandDialog />
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-6">
+        <SidebarTrigger className="-ml-2" />
+        <Separator orientation="vertical" className="mr-2 h-4" />
+        <Breadcrumb>
+          <BreadcrumbList>
+            <BreadcrumbItem>
+              <BreadcrumbPage>Files</BreadcrumbPage>
+            </BreadcrumbItem>
+          </BreadcrumbList>
+        </Breadcrumb>
+      </header>
+
+      <div className="flex-1 overflow-auto">
+        <div className="p-6">
+          <FileBrowser onUploadClick={() => setUploadOpen(true)} />
+        </div>
+      </div>
+
+      <FileUploadDialog open={uploadOpen} onOpenChange={setUploadOpen} />
+    </>
+  )
+}
