@@ -1,0 +1,45 @@
+
+> storage-browser-poc@0.1.0 lint
+> eslint
+
+
+/home/sami/Documents/projects/browser-for-S3/storage-browser-poc/.amplify/artifacts/cdk.out/asset.f2c5bec0e463cae18d0bf683be5923ae6bd676a06af1a994bdfa076a66ac07d6/amplify-table-manager-handler.js
+   27:27  error  A `require()` style import is forbidden                                                                                                                                                                                                                                                 @typescript-eslint/no-require-imports
+   28:25  error  A `require()` style import is forbidden                                                                                                                                                                                                                                                 @typescript-eslint/no-require-imports
+   29:34  error  A `require()` style import is forbidden                                                                                                                                                                                                                                                 @typescript-eslint/no-require-imports
+   30:20  error  A `require()` style import is forbidden                                                                                                                                                                                                                                                 @typescript-eslint/no-require-imports
+   31:16  error  A `require()` style import is forbidden                                                                                                                                                                                                                                                 @typescript-eslint/no-require-imports
+   32:24  error  A `require()` style import is forbidden                                                                                                                                                                                                                                                 @typescript-eslint/no-require-imports
+  721:12  error  React Hook "usePascalCaseForObjectKeys" is called in function "parsePropertiesToDynamoDBInput" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use"  react-hooks/rules-of-hooks
+  730:98  error  React Hook "usePascalCaseForObjectKeys" cannot be called inside a callback. React Hooks must be called in a React function component or a custom React Hook function                                                                                                                    react-hooks/rules-of-hooks
+  733:42  error  React Hook "usePascalCaseForObjectKeys" is called conditionally. React Hooks must be called in the exact same order in every component render. Did you accidentally call a React Hook after an early return?                                                                            react-hooks/rules-of-hooks
+
+/home/sami/Documents/projects/browser-for-S3/storage-browser-poc/.amplify/artifacts/cdk.out/asset.f2c5bec0e463cae18d0bf683be5923ae6bd676a06af1a994bdfa076a66ac07d6/cfn-response.js
+  27:26  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  28:20  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  29:16  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/home/sami/Documents/projects/browser-for-S3/storage-browser-poc/.amplify/artifacts/cdk.out/asset.f2c5bec0e463cae18d0bf683be5923ae6bd676a06af1a994bdfa076a66ac07d6/import-table.js
+  7:42  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  8:27  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/home/sami/Documents/projects/browser-for-S3/storage-browser-poc/.amplify/artifacts/cdk.out/asset.f2c5bec0e463cae18d0bf683be5923ae6bd676a06af1a994bdfa076a66ac07d6/outbound.js
+  27:28  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  28:22  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+/home/sami/Documents/projects/browser-for-S3/storage-browser-poc/.amplify/artifacts/cdk.out/asset.faa95a81ae7d7373f3e1f242268f904eb748d8d0fdd306e8a6fe515a1905a7d6/index.js
+  1:316   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:552   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:623   error    A `require()` style import is forbidden                                @typescript-eslint/no-require-imports
+  1:657   error    A `require()` style import is forbidden                                @typescript-eslint/no-require-imports
+  1:679   error    A `require()` style import is forbidden                                @typescript-eslint/no-require-imports
+  1:1050  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:1262  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:2484  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:2594  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:2808  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:3438  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:4173  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+
+✖ 28 problems (19 errors, 9 warnings)
+
