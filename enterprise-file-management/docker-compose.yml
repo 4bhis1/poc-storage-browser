@@ -10,9 +10,47 @@ services:
       POSTGRES_PASSWORD: mypassword
       POSTGRES_DB: filemanagement
     ports:
-      - "5434:5432"
+      - "5435:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app_network
+
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: file_mgmt_webapp
+    restart: always
+    ports:
+      - "3005:3000"
+    environment:
+      - DATABASE_URL=postgresql://myuser:mypassword@postgres:5432/filemanagement
+      - NEXT_PUBLIC_API_URL=http://localhost:3005
+    depends_on:
+      - postgres
+    networks:
+      - app_network
+
+  prisma-studio:
+    image: node:20-alpine
+    container_name: file_mgmt_studio
+    working_dir: /app
+    volumes:
+      - ./:/app
+    ports:
+      - "5555:5555"
+    environment:
+      - DATABASE_URL=postgresql://myuser:mypassword@postgres:5432/filemanagement
+    command: sh -c "npm install && npx prisma studio --port 5555 --browser none"
+    depends_on:
+      - postgres
+    networks:
+      - app_network
 
 volumes:
   postgres_data:
+
+networks:
+  app_network:
+    driver: bridge

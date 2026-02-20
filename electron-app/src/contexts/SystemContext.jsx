@@ -64,12 +64,9 @@ export const SystemProvider = ({ children }) => {
             setDiskStats(stats);
         });
 
-        // Cleanup function isn't strictly returned by onNetworkStats/onDiskStats in current preload implementation
-        // so we rely on the component unmounting which rarely happens for the root provider.
-        // Ideally we'd implement removeListener in preload.
-        
         return () => {
-            // Cleanup logic if implemented
+            if (cleanupNetwork) cleanupNetwork();
+            if (cleanupDisk) cleanupDisk();
         };
     }, []);
 

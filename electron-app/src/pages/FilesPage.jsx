@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { 
   Folder, 
@@ -6,28 +5,18 @@ import {
   Image as ImageIcon,
   Music,
   Video,
-  MoreVertical, 
-  Grid3X3, 
   List, 
-  ChevronRight, 
-  ArrowLeft,
-  Search,
-  Plus,
+  Grid3X3, 
+  Loader2,
   Cloud,
-  RefreshCw,
-  HardDrive,
-  Download,
-  Upload,
-  Trash2,
-  Copy,
-  Settings,
   CheckCircle2,
-  ArrowUpDown,
   X,
-  Loader2
+  Download,
+  Trash2,
+  MoreVertical,
+  RefreshCw
 } from 'lucide-react';
 import clsx from 'clsx';
-import { useSystem } from '../contexts/SystemContext';
 
 const FileIcon = ({ name, isDirectory, size = 24, className }) => {
     if (isDirectory) return <Folder size={size} className={clsx("text-blue-500 fill-blue-500/20", className)} />;
@@ -50,19 +39,13 @@ const formatBytes = (bytes) => {
     return Math.round(bytes / Math.pow(1024, i), 2) + ' ' + sizes[i];
 };
 
-const FilesPage = ({ rootPath }) => {
-  const { syncState, syncProgress } = useSystem();
+const FilesPage = ({ currentPath, onNavigate, rootPath }) => {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [currentPath, setCurrentPath] = useState(rootPath || '/home/abhishek/demo');
   const [viewMode, setViewMode] = useState('grid');
   const [selectedItems, setSelectedItems] = useState(new Set());
-  const [syncMode, setSyncMode] = useState('two-way'); // 'one-way' | 'two-way'
   const [downloadInfo, setDownloadInfo] = useState(null);
-
-  useEffect(() => {
-    if (rootPath) setCurrentPath(rootPath);
-  }, [rootPath]);
+  const [syncStatus, setSyncStatus] = useState(null);
 
   const fetchContent = (path) => {
       setLoading(true);
@@ -81,20 +64,7 @@ const FilesPage = ({ rootPath }) => {
             setLoading(false);
           });
       } else {
-        // Mock Data simulation
-        setTimeout(() => {
-            setItems([
-                { name: 'Documents', isDirectory: true, size: 0, date: '2024-02-10' },
-                { name: 'Images', isDirectory: true, size: 0, date: '2024-02-11' },
-                { name: 'Work', isDirectory: true, size: 0, date: '2024-02-12' },
-                { name: 'Project_Specs.pdf', isDirectory: false, size: 2400000, date: '2024-02-15' },
-                { name: 'budget_2024.xlsx', isDirectory: false, size: 15000, date: '2024-02-14' },
-                { name: 'vacation.jpg', isDirectory: false, size: 4500000, date: '2024-01-20' },
-                { name: 'intro.mp4', isDirectory: false, size: 156000000, date: '2023-12-25' },
-                { name: 'notes.txt', isDirectory: false, size: 1024, date: '2024-02-16' },
-            ]);
-            setLoading(false);
-        }, 500);
+       
       }
   };
 
@@ -102,6 +72,23 @@ const FilesPage = ({ rootPath }) => {
     fetchContent(currentPath);
     setSelectedItems(new Set());
   }, [currentPath]);
+
+  useEffect(() => {
+    if (window.electronAPI && window.electronAPI.onSyncProgress) {
+        const cleanup = window.electronAPI.onSyncProgress((data) => {
+            if (data.type === 'complete' || data.type === 'error') {
+                // Stop spinner, show summary
+                setSyncStatus({ ...data, active: false });
+                // Refresh file list and auto-dismiss after 4s
+                fetchContent(currentPath);
+                setTimeout(() => setSyncStatus(null), 4000);
+            } else {
+                setSyncStatus({ ...data, active: true });
+            }
+        });
+        return cleanup;
+    }
+  }, []);
 
   useEffect(() => {
       if (window.electronAPI) {
@@ -120,50 +107,14 @@ const FilesPage = ({ rootPath }) => {
                    }, 2000);
                }
           });
-          return cleanup; // Assuming preload returns cleanup function or just ignore
+          return cleanup;
       }
   }, [currentPath]);
 
-  const handleSync = async () => {
-      const url = "https://stx-chatbot-web-ui-v3-uat-a2b8c9d1.s3.ap-south-1.amazonaws.com/index.html";
-      try {
-          setDownloadInfo({ filename: 'index.html', progress: 0, status: 'starting', total: 0 });
-          if (window.electronAPI) {
-            await window.electronAPI.downloadFile(url, currentPath);
-          } else {
-              alert("Download feature only available in Electron app");
-              setDownloadInfo(null);
-          }
-      } catch (error) {
-          console.error("Download failed", error);
-          setDownloadInfo({ filename: 'Download Failed', progress: 0, status: 'error', total: 0 });
-          setTimeout(() => setDownloadInfo(null), 3000);
-      }
-  };
-
-  const handleNavigate = (path) => {
-      setCurrentPath(path);
-  };
-
-  const navigateUp = () => {
-      if (currentPath === rootPath) return;
-      const lastSlashIndex = currentPath.lastIndexOf('/');
-      if (lastSlashIndex > 0) {
-          const parent = currentPath.substring(0, lastSlashIndex);
-          if (parent.length >= rootPath.length) {
-              handleNavigate(parent);
-          } else {
-              handleNavigate(rootPath);
-          }
-      } else {
-           handleNavigate(rootPath);
-      }
-  };
-
   const handleItemClick = (item) => {
       if (item.isDirectory) {
-          const separator = currentPath === '/' ? '' : '/';
-          handleNavigate(`${currentPath}${separator}${item.name}`);
+          const separator = currentPath.endsWith('/') ? '' : '/';
+          onNavigate(`${currentPath}${separator}${item.name}`);
       } else {
           toggleSelect(item.name);
       }
@@ -179,6 +130,57 @@ const FilesPage = ({ rootPath }) => {
       setSelectedItems(newSelected);
   };
 
+  const handleUpload = async (isDirectory) => {
+    if (!window.electronAPI) return;
+
+    let items = [];
+    try {
+        if (isDirectory) {
+            items = await window.electronAPI.selectFolderForUpload();
+        } else {
+            items = await window.electronAPI.selectFileForUpload();
+        }
+    } catch (err) {
+        console.error("Selection cancelled or failed", err);
+        return;
+    }
+
+    if (!items || items.length === 0) return;
+
+    let zip = false;
+    if (isDirectory) {
+        // Simple confirm dialog
+        zip = window.confirm("Do you want to zip this folder before uploading?");
+    }
+
+    try {
+        // Call backend via preload
+        const results = await window.electronAPI.uploadItems(items, currentPath, zip);
+        console.log('Upload Results:', results);
+        fetchContent(currentPath);
+    } catch (error) {
+        console.error('Upload failed:', error);
+    }
+  };
+
+  const handleSync = async () => {
+    if (window.electronAPI) {
+        setLoading(true);
+        try {
+            const result = await window.electronAPI.syncS3(currentPath);
+            console.log('Sync Result:', result);
+            if(result.success) {
+                // Could show a toast here
+            }
+            fetchContent(currentPath);
+        } catch (error) {
+            console.error('Sync failed:', error);
+        } finally {
+            setLoading(false);
+        }
+    }
+  };
+
   const toggleSelectAll = () => {
       if (selectedItems.size === items.length) {
           setSelectedItems(new Set());
@@ -187,65 +189,110 @@ const FilesPage = ({ rootPath }) => {
       }
   };
 
-  // Breadcrumbs Generator
-  const getBreadcrumbs = () => {
-      const parts = currentPath.split('/').filter(p => p);
-      return (
-          <nav className="flex items-center gap-1 text-sm text-slate-500 overflow-hidden">
-             <button onClick={() => handleNavigate(rootPath)} className="hover:text-slate-900 px-1 transition-colors font-medium">Root</button>
-             {parts.map((part, index) => {
-                 const path = '/' + parts.slice(0, index + 1).join('/');
-                 const isClickable = path.startsWith(rootPath);
-                 
-                 if (!isClickable && path !== rootPath) return null;
-                 
-                 return (
-                    <React.Fragment key={path}>
-                        <ChevronRight size={14} className="text-slate-400" />
-                        <button 
-                            onClick={() => path.length >= rootPath.length && handleNavigate(path)}
-                            className={clsx(
-                                "px-1 transition-colors truncate max-w-[150px]",
-                                index === parts.length - 1 ? "font-medium text-slate-900" : "hover:text-slate-900",
-                                path.length < rootPath.length && "opacity-50 cursor-default hover:text-slate-500"
-                            )}
-                        >
-                            {part}
-                        </button>
-                    </React.Fragment>
-                 );
-             })}
-          </nav>
-      );
+  const handleDrop = async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const files = Array.from(e.dataTransfer.files).map(f => f.path);
+      if (files.length > 0 && window.electronAPI) {
+          setLoading(true);
+          try {
+              const results = await window.electronAPI.handleFileDrop(files, currentPath);
+              console.log('Drop results:', results);
+              fetchContent(currentPath); // Refresh
+          } catch (error) {
+              console.error('File drop error:', error);
+          } finally {
+              setLoading(false);
+          }
+      }
+  };
+
+  const handleDragOver = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
   };
 
   return (
-    <div className="h-full flex flex-col bg-white text-slate-900 animate-in fade-in zoom-in-95 duration-300">
+    <div 
+        className="h-full flex flex-col bg-white text-slate-900 absolute inset-0"
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+    >
       
-      {/* 1. Top Toolbar */}
-      <div className="flex flex-col gap-4 p-6 pb-2 border-b border-slate-200 bg-white sticky top-0 z-10">
-          
-          {/* Breadcrumbs & Actions Row */}
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <button 
-                    onClick={navigateUp}
-                    disabled={currentPath === rootPath}
-                    className="p-1.5 rounded hover:bg-slate-100 text-slate-500 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                >
-                    <ArrowLeft size={18} />
-                </button>
-                {getBreadcrumbs()}
-              </div>
+      {/* Minimal Toolbar (View Toggle & Selection Actions only) */}
+      <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-white z-10 sticky top-0">
+            <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-slate-500">
+                    {items.length} items
+                </span>
 
-              <div className="flex items-center gap-3">
-                  {/* View Toggle */}
-                  <div className="flex items-center bg-white rounded-lg p-0.5 border border-slate-200 shadow-sm">
+                {/* Refresh Button */}
+                <button
+                  onClick={() => fetchContent(currentPath)}
+                  disabled={loading}
+                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors ml-2 disabled:opacity-50"
+                  title="Refresh"
+                >
+                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+                </button>
+                
+                {/* Sync Button */}
+                <button 
+                  onClick={() => handleSync()}
+                  disabled={loading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md text-xs font-medium transition-colors ml-2 disabled:opacity-50"
+                  title="Sync with S3"
+                >
+                    <Cloud size={14} />
+                    Sync
+                </button>
+
+                {/* Upload Buttons */}
+                <div className="flex items-center gap-2 ml-2">
+                    <button 
+                        onClick={() => handleUpload(false)}
+                        disabled={loading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-700 hover:bg-slate-100 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                    >
+                        <FileText size={14} />
+                        Upload File
+                    </button>
+                    <button 
+                        onClick={() => handleUpload(true)}
+                        disabled={loading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-700 hover:bg-slate-100 rounded-md text-xs font-medium transition-colors border border-slate-200"
+                    >
+                        <Folder size={14} />
+                        Upload Folder
+                    </button>
+                </div>
+
+                {selectedItems.size > 0 && (
+                    <>
+                        <div className="w-px h-4 bg-slate-300 mx-1" />
+                        <span className="text-sm font-medium text-blue-600">
+                            {selectedItems.size} selected
+                        </span>
+                        <div className="flex items-center gap-1 ml-2">
+                             <button className="p-1 hover:bg-slate-100 rounded text-slate-500" title="Download">
+                                <Download size={16} />
+                             </button>
+                             <button className="p-1 hover:bg-slate-100 rounded text-red-500" title="Delete">
+                                <Trash2 size={16} />
+                             </button>
+                        </div>
+                    </>
+                )}
+            </div>
+
+            <div className="flex items-center gap-2">
+                  <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
                     <button
                         onClick={() => setViewMode('list')}
                         className={clsx(
                             "p-1.5 rounded-md transition-all flex items-center justify-center",
-                            viewMode === 'list' ? "bg-slate-100 text-slate-900 shadow-sm font-medium" : "text-slate-400 hover:text-slate-600"
+                            viewMode === 'list' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
                         )}
                         title="List View"
                     >
@@ -255,124 +302,68 @@ const FilesPage = ({ rootPath }) => {
                         onClick={() => setViewMode('grid')}
                         className={clsx(
                             "p-1.5 rounded-md transition-all flex items-center justify-center",
-                            viewMode === 'grid' ? "bg-slate-100 text-slate-900 shadow-sm font-medium" : "text-slate-400 hover:text-slate-600"
+                            viewMode === 'grid' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
                         )}
                         title="Grid View"
                     >
                         <Grid3X3 size={16} />
                     </button>
                   </div>
-
-                  <button 
-                      onClick={handleSync}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-sm font-medium rounded-lg transition-colors shadow-sm"
-                  >
-                      <RefreshCw size={16} className={downloadInfo ? "animate-spin" : ""} />
-                      <span>Sync</span>
-                  </button>
-
-                  <button 
-                      onClick={() => fetchContent(currentPath)}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors shadow-md shadow-blue-500/20"
-                  >
-                      <Plus size={16} />
-                      <span>Upload</span>
-                  </button>
-              </div>
-          </div>
-          
-          {/* Selected Action Bar */}
-          {selectedItems.size > 0 && (
-            <div className="flex items-center gap-3 text-sm animate-in slide-in-from-top-1 bg-blue-50 p-2 rounded-lg border border-blue-100">
-              <span className="text-blue-700 font-medium px-2">
-                {selectedItems.size} selected
-              </span>
-              <div className="h-4 w-px bg-blue-200" />
-              <button 
-                className="flex items-center gap-1.5 px-3 py-1 hover:bg-blue-100 rounded text-blue-700 transition-colors"
-                onClick={() => alert(`Downloading ${selectedItems.size} files...`)}
-              >
-                <Download size={14} /> Download
-              </button>
-              <button 
-                className="flex items-center gap-1.5 px-3 py-1 hover:bg-red-100 rounded text-red-600 transition-colors"
-                onClick={() => { setSelectedItems(new Set()); alert('Deleted files'); }}
-              >
-                <Trash2 size={14} /> Delete
-              </button>
             </div>
-          )}
       </div>
 
-      {/* Sync Banner Progress */}
-      {syncState.status === 'syncing' && (
-         <div className="bg-white border-b border-indigo-100 p-3 flex items-center gap-4 px-6">
-             <div className="p-1.5 bg-indigo-50 rounded-full animate-spin">
-                <RefreshCw size={14} className="text-indigo-600" />
-             </div>
-             <div className="flex-1 max-w-2xl">
-                <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-indigo-900 font-medium">Syncing changes to S3...</span>
-                    <span className="text-indigo-600">{Math.round((syncProgress.current / syncProgress.total) * 100)}%</span>
-                </div>
-                <div className="h-1 bg-slate-100 rounded-full overflow-hidden">
-                    <div 
-                        className="h-full bg-gradient-to-r from-blue-500 to-indigo-500 transition-all duration-300" 
-                        style={{ width: `${(syncProgress.current / syncProgress.total) * 100}%` }} 
-                    />
-                </div>
-                <p className="text-[10px] text-slate-500 mt-1 font-mono">{syncProgress.filename}</p>
-             </div>
-         </div>
-      )}
-
-      {/* 2. Content Area */}
+      {/* Content Area */}
       <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
         {loading ? (
-             <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                <div className="w-8 h-8 border-2 border-blue-500/50 border-t-blue-500 rounded-full animate-spin mb-4" />
+             <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                <Loader2 size={32} className="animate-spin text-blue-500 mb-4" />
                 <p>Loading contents...</p>
             </div>
         ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-96 text-slate-400 border-2 border-dashed border-slate-200 rounded-2xl bg-slate-50/50">
+            <div className="flex flex-col items-center justify-center h-full text-slate-400">
                 <Cloud size={64} className="mb-4 opacity-20" />
                 <p className="text-lg font-medium text-slate-600">Folder is empty</p>
-                <p className="text-sm opacity-50">Drag and drop files to upload</p>
+                <div 
+                    className="mt-4 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium cursor-pointer hover:bg-blue-100 transition-colors"
+                    onClick={() => fetchContent(currentPath)}
+                >
+                    Refresh
+                </div>
             </div>
         ) : (
             <>
                 {viewMode === 'grid' ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-10">
                         {items.map((item, i) => (
                             <div 
                                 key={i}
                                 onClick={() => handleItemClick(item)}
                                 className={clsx(
-                                    "group p-4 bg-white border rounded-xl cursor-pointer transition-all hover:bg-slate-50 hover:shadow-md flex flex-col gap-3 relative",
-                                    selectedItems.has(item.name) ? "border-blue-500 ring-1 ring-blue-500/50 bg-blue-50" : "border-slate-200 hover:border-slate-300"
+                                    "group p-4 bg-white border rounded-xl cursor-pointer transition-all hover:bg-slate-50 hover:shadow-md flex flex-col gap-3 relative select-none",
+                                    selectedItems.has(item.name) ? "border-blue-500 ring-1 ring-blue-500/50 bg-blue-50/50" : "border-slate-200 hover:border-slate-300"
                                 )}
                             >
-                                <div className="flex justify-between items-start">
+                                <div className="flex justify-between items-start pointer-events-none">
                                     <div className={clsx(
-                                        "p-2.5 rounded-lg border",
-                                        item.isDirectory ? "bg-blue-50 border-blue-100" : "bg-white border-slate-100"
+                                        "p-3 rounded-xl border transition-colors",
+                                        item.isDirectory ? "bg-blue-50 border-blue-100 text-blue-600" : "bg-white border-slate-100 text-slate-500"
                                     )}>
-                                        <FileIcon name={item.name} isDirectory={item.isDirectory} size={24} />
+                                        <FileIcon name={item.name} isDirectory={item.isDirectory} size={28} />
                                     </div>
-                                    <input 
-                                        type="checkbox" 
-                                        checked={selectedItems.has(item.name)}
-                                        onChange={() => toggleSelect(item.name)}
-                                        className={clsx(
-                                            "w-4 h-4 rounded border-slate-300 bg-white checked:bg-blue-500 transition-opacity cursor-pointer",
-                                            selectedItems.has(item.name) ? "opacity-100" : "opacity-0 group-hover:opacity-100"
-                                        )}
-                                        onClick={(e) => e.stopPropagation()}
-                                    />
+                                    <div className="pointer-events-auto" onClick={(e) => { e.stopPropagation(); toggleSelect(item.name); }}>
+                                        <div className={clsx(
+                                            "w-5 h-5 rounded border flex items-center justify-center transition-all",
+                                            selectedItems.has(item.name) 
+                                                ? "bg-blue-500 border-blue-500 text-white" 
+                                                : "border-slate-300 bg-white opacity-0 group-hover:opacity-100 hover:border-blue-400"
+                                        )}>
+                                            {selectedItems.has(item.name) && <CheckCircle2 size={12} />}
+                                        </div>
+                                    </div>
                                 </div>
                                 <div>
                                     <p className="font-medium text-slate-700 text-sm truncate" title={item.name}>{item.name}</p>
-                                    <p className="text-[10px] text-slate-400 mt-0.5">
+                                    <p className="text-[10px] text-slate-400 mt-1 font-medium">
                                         {item.isDirectory ? 'Folder' : formatBytes(item.size || 0)}
                                     </p>
                                 </div>
@@ -380,7 +371,7 @@ const FilesPage = ({ rootPath }) => {
                         ))}
                     </div>
                 ) : (
-                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm">
+                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm mb-10">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-50 text-slate-500 text-xs uppercase border-b border-slate-200 font-medium">
                                 <tr>
@@ -404,8 +395,8 @@ const FilesPage = ({ rootPath }) => {
                                         key={i} 
                                         onClick={() => handleItemClick(item)}
                                         className={clsx(
-                                            "group transition-colors cursor-pointer",
-                                            selectedItems.has(item.name) ? "bg-blue-50 hover:bg-blue-100" : "hover:bg-slate-50"
+                                            "group transition-colors cursor-pointer select-none",
+                                            selectedItems.has(item.name) ? "bg-blue-50/50 hover:bg-blue-100/50" : "hover:bg-slate-50"
                                         )}
                                     >
                                         <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -447,52 +438,132 @@ const FilesPage = ({ rootPath }) => {
 
       {/* Download Progress Dialog */}
       {downloadInfo && (
-        <div className="fixed inset-0 bg-black/20 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
-                <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                    <h3 className="font-semibold text-slate-900 flex items-center gap-2">
-                        {downloadInfo.status === 'downloading' || downloadInfo.status === 'starting' ? (
-                            <Loader2 size={18} className="animate-spin text-blue-600" />
-                        ) : downloadInfo.status === 'completed' ? (
-                            <CheckCircle2 size={18} className="text-green-600" />
-                        ) : (
-                            <X size={18} className="text-red-600" />
-                        )}
-                        {downloadInfo.status === 'completed' ? 'Download Complete' : 'Downloading File'}
-                    </h3>
-                    {downloadInfo.status === 'completed' && (
-                        <button onClick={() => setDownloadInfo(null)} className="text-slate-400 hover:text-slate-600">
-                            <X size={16} />
-                        </button>
+        <div className="fixed bottom-6 right-6 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-5 duration-300 z-50">
+            {/* Same as before... */}
+            <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-2">
+                    {downloadInfo.status === 'downloading' || downloadInfo.status === 'starting' ? (
+                        <Loader2 size={14} className="animate-spin text-blue-600" />
+                    ) : downloadInfo.status === 'completed' ? (
+                        <CheckCircle2 size={14} className="text-green-600" />
+                    ) : (
+                        <X size={14} className="text-red-600" />
                     )}
+                    {downloadInfo.status === 'completed' ? 'Download Complete' : 'Downloading...'}
+                </h3>
+                {downloadInfo.status === 'completed' && (
+                    <button onClick={() => setDownloadInfo(null)} className="text-slate-400 hover:text-slate-600">
+                        <X size={14} />
+                    </button>
+                )}
+            </div>
+            <div className="p-3">
+                <div className="flex items-center gap-3 mb-2">
+                    <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                        <FileText size={16} />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="font-medium text-slate-900 truncate text-xs">{downloadInfo.filename}</p>
+                        <p className="text-[10px] text-slate-500">
+                            {downloadInfo.status === 'starting' ? 'Connecting...' : 
+                             `${downloadInfo.progress}% • ${downloadInfo.total ? formatBytes(downloadInfo.total) : ''}`}
+                        </p>
+                    </div>
                 </div>
-                <div className="p-5">
-                    <div className="flex items-center gap-3 mb-4">
-                        <div className="p-2 bg-blue-50 text-blue-600 rounded-lg">
-                            <FileText size={24} />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="font-medium text-slate-900 truncate">{downloadInfo.filename}</p>
-                            <p className="text-xs text-slate-500">
-                                {downloadInfo.status === 'starting' ? 'Connecting...' : 
-                                 downloadInfo.status === 'error' ? 'Failed' : 
-                                 `${downloadInfo.progress}% • ${downloadInfo.total ? formatBytes(downloadInfo.total) : 'Unknown size'}`}
-                            </p>
-                        </div>
-                    </div>
-                    
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
-                        <div 
-                            className={clsx(
-                                "h-full transition-all duration-300",
-                                downloadInfo.status === 'completed' ? "bg-green-500" : 
-                                downloadInfo.status === 'error' ? "bg-red-500" : "bg-blue-600"
-                            )}
-                            style={{ width: `${downloadInfo.progress}%` }}
-                        />
-                    </div>
+                
+                <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
+                    <div 
+                        className={clsx(
+                            "h-full transition-all duration-300",
+                            downloadInfo.status === 'completed' ? "bg-green-500" : 
+                            downloadInfo.status === 'error' ? "bg-red-500" : "bg-blue-600"
+                        )}
+                        style={{ width: `${downloadInfo.progress}%` }}
+                    />
                 </div>
             </div>
+        </div>
+      )}
+
+      {/* Sync Progress Toast */}
+      {syncStatus && (
+        <div className="fixed bottom-6 right-6 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50" style={{animation: 'slideUp 0.3s ease'}}>
+          <div className={clsx(
+            "p-3 border-b border-slate-100 flex justify-between items-center",
+            syncStatus.type === 'upload' ? 'bg-purple-50/60' :
+            syncStatus.type === 'download' ? 'bg-emerald-50/60' :
+            syncStatus.type === 'complete' ? 'bg-green-50/60' :
+            syncStatus.type === 'error' ? 'bg-red-50/60' : 'bg-slate-50/60'
+          )}>
+            <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-2">
+              {syncStatus.active ? (
+                <Loader2 size={14} className={clsx(
+                  'animate-spin',
+                  syncStatus.type === 'upload' ? 'text-purple-600' : 'text-emerald-600'
+                )} />
+              ) : syncStatus.type === 'error' ? (
+                <X size={14} className="text-red-500" />
+              ) : (
+                <CheckCircle2 size={14} className="text-green-600" />
+              )}
+              {syncStatus.type === 'upload' ? 'Uploading to S3...' :
+               syncStatus.type === 'download' ? 'Downloading from S3...' :
+               syncStatus.type === 'complete' ? 'Sync Complete' :
+               syncStatus.type === 'error' ? 'Sync Error' : 'Syncing...'}
+            </h3>
+            {!syncStatus.active && (
+              <button onClick={() => setSyncStatus(null)} className="text-slate-400 hover:text-slate-600">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div className="p-3">
+            {/* Upload row */}
+            {syncStatus.type === 'upload' && (
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg flex-shrink-0">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-900 truncate text-xs">{syncStatus.filename}</p>
+                  <p className="text-[10px] text-purple-600 font-semibold uppercase tracking-wider">Uploading</p>
+                </div>
+              </div>
+            )}
+
+            {/* Download row */}
+            {syncStatus.type === 'download' && (
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-emerald-100 text-emerald-600 rounded-lg flex-shrink-0">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-900 truncate text-xs">{syncStatus.filename}</p>
+                  <p className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wider">Downloading</p>
+                </div>
+              </div>
+            )}
+
+            {/* Info / Complete / Error */}
+            {(syncStatus.type === 'info' || syncStatus.type === 'complete' || syncStatus.type === 'error') && (
+              <div className="flex items-center gap-3">
+                <div className={clsx(
+                  'p-1.5 rounded-lg flex-shrink-0',
+                  syncStatus.type === 'complete' ? 'bg-green-100 text-green-600' :
+                  syncStatus.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'
+                )}>
+                  <Cloud size={16} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-slate-900 text-xs">{syncStatus.message || 'Processing...'}</p>
+                  {syncStatus.type === 'complete' && (
+                    <p className="text-[10px] text-green-600 font-semibold uppercase tracking-wider">Complete</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
 

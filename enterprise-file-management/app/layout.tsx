@@ -4,6 +4,9 @@ import { Analytics } from '@vercel/analytics/next'
 import { ThemeProvider } from '@/components/theme-provider'
 import { Toaster } from '@/components/ui/sonner'
 import './globals.css'
+import { AuthProvider } from '@/components/providers/AuthProvider'
+import { UploadProvider } from '@/components/providers/upload-provider'
+import { GlobalUploadIndicator } from '@/components/global-upload-indicator'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
@@ -11,23 +14,6 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] });
 export const metadata: Metadata = {
   title: 'CloudVault - Enterprise File Management',
   description: 'Secure multi-tenant file management powered by S3',
-  icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
-  },
 }
 
 export default function RootLayout({
@@ -44,8 +30,13 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-          {children}
-          <Toaster />
+          <AuthProvider>
+            <UploadProvider>
+              {children}
+              <GlobalUploadIndicator />
+              <Toaster />
+            </UploadProvider>
+          </AuthProvider>
         </ThemeProvider>
         <Analytics />
       </body>

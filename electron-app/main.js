@@ -78,7 +78,6 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
-
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -155,6 +154,7 @@ ipcMain.handle('list-path-content', async (event, folderPath) => {
   }
 });
 
+
 // Create folder
 ipcMain.handle('create-folder', async (event, folderPath) => {
     try {
@@ -167,17 +167,21 @@ ipcMain.handle('create-folder', async (event, folderPath) => {
 
 });
 
+const backendManager = require('./backend/index.js');
+
 // Download File Handler
 ipcMain.handle('download-file', async (event, { url, targetPath }) => {
+    // ... existing download code ...
     return new Promise((resolve, reject) => {
         const fileName = path.basename(url);
         const destination = path.join(targetPath, fileName);
         const file = fs.createWriteStream(destination);
 
         https.get(url, (response) => {
+            // ... existing code ...
             if (response.statusCode !== 200) {
                 file.close();
-                fs.unlink(destination, () => {}); // Delete the file async
+                fs.unlink(destination, () => {}); 
                 reject(`Server responded with ${response.statusCode}: ${response.statusMessage}`);
                 return;
             }
@@ -188,33 +192,69 @@ ipcMain.handle('download-file', async (event, { url, targetPath }) => {
             response.on('data', (chunk) => {
                 receivedBytes += chunk.length;
                 if (totalBytes) {
-                    const progress = (receivedBytes / totalBytes) * 100;
-                    if (mainWindow) {
-                        mainWindow.webContents.send('download-progress', {
-                            filename: fileName,
-                            progress: progress,
-                            received: receivedBytes,
-                            total: totalBytes
-                        });
-                    }
+                     const progress = (receivedBytes / totalBytes) * 100;
+                     if (mainWindow) {
+                         mainWindow.webContents.send('download-progress', {
+                             filename: fileName,
+                             progress: progress,
+                             received: receivedBytes,
+                             total: totalBytes
+                         });
+                     }
                 }
             });
 
             response.pipe(file);
 
             file.on('finish', () => {
-                file.close(() => {
-                    resolve({ success: true, path: destination });
-                });
+                file.close(() => resolve({ success: true, path: destination }));
             });
 
             file.on('error', (err) => {
-                fs.unlink(destination, () => {}); // Delete the file async
+                fs.unlink(destination, () => {}); 
                 reject(err.message);
             });
         }).on('error', (err) => {
-            fs.unlink(destination, () => {}); // Delete the file async
+            fs.unlink(destination, () => {}); 
             reject(err.message);
         });
     });
+});
+
+// Handle File Drop (Copy & Sync)
+ipcMain.handle('handle-file-drop', async (event, { files, currentPath }) => {
+    console.log('Files dropped:', files, 'Current Directory:', currentPath);
+    return await backendManager.handleFileDrop(files, currentPath);
+});
+
+// Handle S3 Sync
+ipcMain.handle('sync-s3-to-local', async (event, folderPath) => {
+    return await backendManager.syncFromS3(folderPath, (data) => {
+        if (event.sender) {
+            event.sender.send('sync-progress', data);
+        }
+    });
+});
+
+// Select File for Upload
+ipcMain.handle('select-file', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile', 'multiSelections']
+    });
+    if (canceled) return null;
+    return filePaths;
+});
+
+// Select Folder for Upload
+ipcMain.handle('select-folder-upload', async () => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openDirectory', 'multiSelections'] 
+    });
+    if (canceled) return null;
+    return filePaths;
+});
+
+// Upload Items (with Zip option)
+ipcMain.handle('upload-items', async (event, { items, currentPath, shouldZip }) => {
+    return await backendManager.uploadItems(items, currentPath, shouldZip);
 });

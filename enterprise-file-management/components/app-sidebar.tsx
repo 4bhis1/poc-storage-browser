@@ -2,6 +2,7 @@
 
 import {
   AudioWaveform,
+  Building,
   ChevronDown,
   Cloud,
   CreditCard,
@@ -14,6 +15,7 @@ import {
   Settings,
   Shield,
   User,
+  Users,
 } from "lucide-react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
@@ -40,12 +42,18 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { ThemeToggle } from "@/components/theme-toggle"
+import { useAuth } from "@/components/providers/AuthProvider"
 
 const mainNav = [
   { title: "Overview", icon: LayoutDashboard, href: "/" },
-  { title: "Files", icon: FolderOpen, href: "/files" },
   { title: "Buckets", icon: HardDrive, href: "/buckets" },
   { title: "Search", icon: Search, href: "/search" },
+]
+
+const tenantNav = [
+  ...mainNav,
+  { title: "AWS Accounts", icon: Cloud, href: "/accounts" },
+  { title: "Teammates", icon: Users, href: "/teammates" },
 ]
 
 const managementNav = [
@@ -55,6 +63,16 @@ const managementNav = [
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const { user, logout } = useAuth()
+
+  let navItems = mainNav;
+  if (user?.role === 'PLATFORM_ADMIN') {
+    navItems = [...mainNav, { title: "Tenants", icon: Building, href: "/tenants" }]
+  } else if (user?.role === 'TENANT_ADMIN') {
+    navItems = tenantNav
+  }
+
+  if (!user) return null
 
   return (
     <Sidebar variant="inset">
@@ -70,7 +88,7 @@ export function AppSidebar() {
                   <div className="flex flex-col gap-0.5 leading-none">
                     <span className="font-semibold">CloudVault</span>
                     <span className="text-xs text-muted-foreground">
-                      Acme Corporation
+                      {user.tenantName || 'Enterprise'}
                     </span>
                   </div>
                   <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
@@ -84,11 +102,7 @@ export function AppSidebar() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem>
                   <Cloud className="mr-2 h-4 w-4" />
-                  Acme Corporation
-                </DropdownMenuItem>
-                <DropdownMenuItem>
-                  <AudioWaveform className="mr-2 h-4 w-4" />
-                  Acme Labs
+                  {user.tenantName || 'Enterprise'}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -101,7 +115,7 @@ export function AppSidebar() {
           <SidebarGroupLabel>Platform</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {mainNav.map((item) => (
+              {navItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild
@@ -170,13 +184,13 @@ export function AppSidebar() {
                 <SidebarMenuButton size="lg" className="w-full">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                      SC
+                      {user.name?.substring(0, 2).toUpperCase() || 'U'}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col gap-0.5 leading-none">
-                    <span className="text-sm font-medium">Sarah Chen</span>
+                    <span className="text-sm font-medium">{user.name}</span>
                     <span className="text-xs text-muted-foreground">
-                      Admin
+                      {user.role}
                     </span>
                   </div>
                 </SidebarMenuButton>
@@ -189,13 +203,13 @@ export function AppSidebar() {
                 <DropdownMenuLabel className="flex items-center gap-2">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                      SC
+                      {user.name?.substring(0, 2).toUpperCase() || 'U'}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col">
-                    <span className="text-sm">Sarah Chen</span>
+                    <span className="text-sm">{user.name}</span>
                     <span className="text-xs text-muted-foreground font-normal">
-                      sarah@acme.co
+                      {user.email}
                     </span>
                   </div>
                 </DropdownMenuLabel>
@@ -218,7 +232,7 @@ export function AppSidebar() {
                   <ThemeToggle />
                 </div>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem>
+                <DropdownMenuItem onClick={logout}>
                   <LogOut className="mr-2 h-4 w-4" />
                   Sign out
                 </DropdownMenuItem>

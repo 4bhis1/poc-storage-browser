@@ -7,23 +7,26 @@ datasource db {
   provider = "postgresql"
 }
 
-
 model Tenant {
   id        String    @id @default(cuid())
   name      String
-  accounts  Account[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+  accounts  Account[]
+  users     User[]
 }
 
 model Account {
-  id        String    @id @default(cuid())
-  name      String
-  tenantId  String
-  tenant    Tenant    @relation(fields: [tenantId], references: [id])
-  buckets   Bucket[]
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  id                 String   @id @default(cuid())
+  name               String
+  tenantId           String
+  awsAccessKeyId     String?
+  awsSecretAccessKey String?
+  isActive           Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  tenant             Tenant   @relation(fields: [tenantId], references: [id])
+  buckets            Bucket[]
 }
 
 model Bucket {
@@ -31,24 +34,70 @@ model Bucket {
   name      String
   region    String
   accountId String
-  account   Account      @relation(fields: [accountId], references: [id])
-  objects   FileObject[]
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
+  account   Account      @relation(fields: [accountId], references: [id])
+  objects   FileObject[]
+  versioning Boolean     @default(false)
+  encryption Boolean     @default(false)
+  tags       String[]
+  quotaBytes BigInt      @default(107374182400) // 100GB
 }
 
 model FileObject {
   id        String       @id @default(cuid())
   name      String
-  key       String       
+  key       String
   isFolder  Boolean      @default(false)
   size      Int?
   mimeType  String?
   bucketId  String
-  bucket    Bucket       @relation(fields: [bucketId], references: [id])
   parentId  String?
-  parent    FileObject?  @relation("ParentChild", fields: [parentId], references: [id])
-  children  FileObject[] @relation("ParentChild")
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
+  bucket    Bucket       @relation(fields: [bucketId], references: [id])
+  parent    FileObject?  @relation("ParentChild", fields: [parentId], references: [id])
+  children  FileObject[] @relation("ParentChild")
+}
+
+model User {
+  id        String           @id @default(cuid())
+  email     String           @unique
+  password  String
+  name      String?
+  role      Role             @default(TEAMMATE)
+  tenantId  String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  auditLogs AuditLog[]
+  policies  ResourcePolicy[]
+  tenant    Tenant?          @relation(fields: [tenantId], references: [id])
+}
+
+model ResourcePolicy {
+  id           String   @id @default(cuid())
+  userId       String
+  resourceType String
+  resourceId   String?
+  actions      String[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  user         User     @relation(fields: [userId], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  resource  String
+  details   String?
+  status    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+enum Role {
+  PLATFORM_ADMIN
+  TENANT_ADMIN
+  TEAMMATE
 }

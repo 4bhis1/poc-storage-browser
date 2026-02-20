@@ -28,6 +28,7 @@ import {
 import { toast } from "sonner"
 import { mockOrganization, mockUsers } from "@/lib/mock-data"
 import { SearchCommandDialog } from "@/components/search-command"
+import { AwsAccountSettings } from "@/components/settings/aws-account-settings"
 
 export default function SettingsPage() {
   const [showApiKey, setShowApiKey] = React.useState(false)
@@ -61,6 +62,7 @@ export default function SettingsPage() {
             <TabsList>
               <TabsTrigger value="profile">Profile</TabsTrigger>
               <TabsTrigger value="organization">Organization</TabsTrigger>
+              <TabsTrigger value="cloud">Cloud Integrations</TabsTrigger>
               <TabsTrigger value="security">Security</TabsTrigger>
               <TabsTrigger value="preferences">Preferences</TabsTrigger>
             </TabsList>
@@ -316,6 +318,11 @@ export default function SettingsPage() {
                   </p>
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            {/* Cloud Integrations */}
+            <TabsContent value="cloud" className="space-y-6">
+              <AwsAccountSettings />
             </TabsContent>
 
             {/* Preferences */}

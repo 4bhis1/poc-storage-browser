@@ -1,66 +1,34 @@
 
-import React, { useState } from 'react';
-import { Activity, FolderSync, ShieldAlert, Settings, HardDrive, Search } from 'lucide-react';
-import Sidebar from './components/Sidebar';
+import React, { useState, useEffect } from 'react';
 import TopBar from './components/TopBar';
-import TransfersPage from './pages/TransfersPage';
 import FilesPage from './pages/FilesPage';
-import SearchPage from './pages/SearchPage';
-import BucketsPage from './pages/BucketsPage';
-import SecurityPage from './pages/SecurityPage';
-import SettingsPage from './pages/SettingsPage';
 import { SystemProvider } from './contexts/SystemContext';
-import { AuthProvider } from './contexts/AuthContext';
 
 const AppContent = () => {
-    const [activeTab, setActiveTab] = useState('transfers');
-    const [view, setView] = useState('dashboard'); 
-    const [rootPath, setRootPath] = useState('/home/abhishek/demo');
+    // Determine initial root path - strictly hardcoded or could be dynamic
+    // I will keep it for now.
+    const rootPath = '/home/abhishek/FMS';
+    const [currentPath, setCurrentPath] = useState(rootPath);
 
-    const tabs = [
-        { id: 'transfers', icon: Activity, label: 'Activity' },
-        { id: 'files', icon: FolderSync, label: 'Files' },
-        { id: 'buckets', icon: HardDrive, label: 'Buckets' },
-        { id: 'search', icon: Search, label: 'Search' },
-        { id: 'security', icon: ShieldAlert, label: 'Security', alert: true },
-        { id: 'settings', icon: Settings, label: 'Config' }
-    ];
-
-    const renderContent = () => {
-        switch (activeTab) {
-            case 'transfers': return <TransfersPage />;
-            case 'files': return <FilesPage rootPath={rootPath} />;
-            case 'buckets': return <BucketsPage />;
-            case 'search': return <SearchPage />;
-            case 'security': return <SecurityPage />;
-            case 'settings': return <SettingsPage rootPath={rootPath} onUpdateRootPath={setRootPath} />;
-            default: return <TransfersPage />;
-        }
-    };
-
+    // If rootPath changes, reset currentPath (e.g. if we had a settings page to change it, but we removed it. 
+    // Keeping it simple).
+    
     return (
-        <div className="flex h-screen w-screen bg-slate-50 text-slate-900 font-sans selection:bg-blue-100 overflow-hidden">
-            {/* Dashboard View Container - Full Screen Layout */}
-            <div className="flex w-full h-full">
-                
-                <Sidebar 
-                    tabs={tabs} 
-                    activeTab={activeTab} 
-                    onTabChange={setActiveTab} 
-                    onViewChange={setView}
+        <div className="flex flex-col h-screen w-screen bg-white text-slate-900 font-sans selection:bg-blue-100 overflow-hidden">
+            {/* Top Navigation Bar with Stats & Breadcrumbs */}
+            <TopBar 
+                currentPath={currentPath} 
+                onNavigate={setCurrentPath} 
+                rootPath={rootPath} 
+            />
+
+            {/* Main Content Area */}
+            <div className="flex-1 overflow-hidden relative">
+                <FilesPage 
+                    currentPath={currentPath} 
+                    onNavigate={setCurrentPath}
+                    rootPath={rootPath}
                 />
-
-                {/* Main Content Area */}
-                <div className="flex-1 flex flex-col min-w-0 bg-white">
-                    
-                    {/* Top Navigation Bar with Stats */}
-                    <TopBar activeTab={activeTab} />
-
-                    {/* Page Content */}
-                    <div className="flex-1 overflow-hidden p-0">
-                        {renderContent()}
-                    </div>
-                </div>
             </div>
         </div>
     );
@@ -69,12 +37,9 @@ const AppContent = () => {
 const SidecarUI = () => {
     return (
         <SystemProvider>
-            <AuthProvider>
-                <AppContent />
-            </AuthProvider>
+            <AppContent />
         </SystemProvider>
     );
 };
-
 
 export default SidecarUI;

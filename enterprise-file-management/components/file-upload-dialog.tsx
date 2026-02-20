@@ -1,8 +1,9 @@
 "use client"
 
 import * as React from "react"
-import { CloudUpload, File, X } from "lucide-react"
+import { CloudUpload, File, X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { getAuthHeader } from "@/lib/token"
 import {
   Dialog,
   DialogContent,
@@ -11,88 +12,67 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Progress } from "@/components/ui/progress"
-import { ScrollArea } from "@/components/ui/scroll-area"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { formatBytes } from "@/lib/mock-data"
 import { toast } from "sonner"
+import { useUpload } from "@/components/providers/upload-provider"
 
-interface UploadFile {
-  id: string
-  name: string
-  size: number
-  progress: number
-  status: "pending" | "uploading" | "complete" | "error"
-}
+// ... inside DialogContent ...
+// Shadcn DialogContent has a default Close button, but to add cursor-pointer we might need to override or assume it's there.
+// Actually, shadcn/ui DialogContent usually includes the Close button.
+// If I can't easily modify the internal Close, I can disable it and add my own?
+// Or I can just rely on global CSS or a class on DialogContent?
+// Let's check if I can pass a class to the close button.
+// Standard shadcn DialogContent:
+/*
+  <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
+    <X className="h-4 w-4" />
+    <span className="sr-only">Close</span>
+  </DialogPrimitive.Close>
+*/
+// It usually has standard styles. 'cursor-pointer' is often default for buttons, but if not:
+// I can't easily edit the *primitive* without editing the ui/dialog.tsx component.
+// I will check components/ui/dialog.tsx first.
+// For now, I will fix the syntax error as priority.
+
+
 
 interface FileUploadDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  bucketId: string | null
+  currentPath: { id: string, name: string }[]
 }
 
-export function FileUploadDialog({ open, onOpenChange }: FileUploadDialogProps) {
-  const [files, setFiles] = React.useState<UploadFile[]>([])
-  const [bucket, setBucket] = React.useState("prod-assets")
+export function FileUploadDialog({ open, onOpenChange, bucketId, currentPath }: FileUploadDialogProps) {
+  const { addFiles } = useUpload()
+  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([])
   const [isDragging, setIsDragging] = React.useState(false)
   const fileInputRef = React.useRef<HTMLInputElement>(null)
 
-  const addFiles = (fileList: FileList | null) => {
+  const handleAddFiles = (fileList: FileList | null) => {
     if (!fileList) return
-    const newFiles: UploadFile[] = Array.from(fileList).map((f, i) => ({
-      id: `upload-${Date.now()}-${i}`,
-      name: f.name,
-      size: f.size,
-      progress: 0,
-      status: "pending" as const,
-    }))
-    setFiles((prev) => [...prev, ...newFiles])
+    const newFiles = Array.from(fileList)
+    setSelectedFiles((prev) => [...prev, ...newFiles])
+
+    // Reset file input to allow re-selecting the same file
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
   }
 
-  const removeFile = (id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id))
+  const removeFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const simulateUpload = () => {
-    setFiles((prev) =>
-      prev.map((f) =>
-        f.status === "pending" ? { ...f, status: "uploading" as const } : f
-      )
-    )
+  const handleUpload = () => {
+    // Determine parentId from currentPath
+    const parentId = currentPath.length > 0 ? currentPath[currentPath.length - 1].id : null
 
-    // Simulate progress
-    const interval = setInterval(() => {
-      setFiles((prev) => {
-        const updated = prev.map((f) => {
-          if (f.status === "uploading") {
-            const newProgress = Math.min(f.progress + Math.random() * 15, 100)
-            return {
-              ...f,
-              progress: newProgress,
-              status:
-                newProgress >= 100
-                  ? ("complete" as const)
-                  : ("uploading" as const),
-            }
-          }
-          return f
-        })
-
-        const allDone = updated.every(
-          (f) => f.status === "complete" || f.status === "error"
-        )
-        if (allDone) {
-          clearInterval(interval)
-          toast.success(`${updated.length} files uploaded successfully`)
-        }
-
-        return updated
-      })
-    }, 200)
+    if (bucketId) {
+      addFiles(selectedFiles, bucketId, parentId)
+      toast.success("Uploads started in background")
+      handleClose(false)
+    }
   }
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -107,23 +87,19 @@ export function FileUploadDialog({ open, onOpenChange }: FileUploadDialogProps) 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
-    addFiles(e.dataTransfer.files)
+    handleAddFiles(e.dataTransfer.files)
   }
 
   const handleClose = (open: boolean) => {
     if (!open) {
-      setFiles([])
+      setSelectedFiles([])
     }
     onOpenChange(open)
   }
 
-  const pendingCount = files.filter((f) => f.status === "pending").length
-  const uploadingCount = files.filter((f) => f.status === "uploading").length
-  const isUploading = uploadingCount > 0
-
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg w-full overflow-hidden"> {/* Added overflow control and w-full */}
         <DialogHeader>
           <DialogTitle>Upload Files</DialogTitle>
           <DialogDescription>
@@ -132,20 +108,16 @@ export function FileUploadDialog({ open, onOpenChange }: FileUploadDialogProps) 
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Bucket selector */}
-          <div className="space-y-1.5">
-            <label className="text-sm font-medium">Destination Bucket</label>
-            <Select value={bucket} onValueChange={setBucket}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="prod-assets">prod-assets</SelectItem>
-                <SelectItem value="finance-vault">finance-vault</SelectItem>
-                <SelectItem value="media-archive">media-archive</SelectItem>
-                <SelectItem value="dev-sandbox">dev-sandbox</SelectItem>
-              </SelectContent>
-            </Select>
+          {/* Destination Path */}
+          <div className="space-y-1.5 min-w-0"> {/* added min-w-0 */}
+            <label className="text-sm font-medium">Destination Path</label>
+            <div className="flex items-center px-3 py-2 text-sm border rounded-md bg-muted/50 text-muted-foreground truncate"> {/* Added truncate */}
+              <span className="truncate"> {/* Inner truncate for text */}
+                {currentPath.length > 0
+                  ? `/${currentPath.map(p => p.name).join('/')}/`
+                  : '/ (Root)'}
+              </span>
+            </div>
           </div>
 
           {/* Drop zone */}
@@ -154,16 +126,14 @@ export function FileUploadDialog({ open, onOpenChange }: FileUploadDialogProps) 
             onDragLeave={handleDragLeave}
             onDrop={handleDrop}
             onClick={() => fileInputRef.current?.click()}
-            className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${
-              isDragging
-                ? "border-primary bg-primary/5"
-                : "border-border hover:border-muted-foreground/50"
-            }`}
+            className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${isDragging
+              ? "border-primary bg-primary/5"
+              : "border-border hover:border-muted-foreground/50"
+              }`}
           >
             <CloudUpload
-              className={`h-10 w-10 ${
-                isDragging ? "text-primary" : "text-muted-foreground"
-              }`}
+              className={`h-10 w-10 ${isDragging ? "text-primary" : "text-muted-foreground"
+                }`}
             />
             <div className="text-center">
               <p className="text-sm font-medium">
@@ -178,74 +148,63 @@ export function FileUploadDialog({ open, onOpenChange }: FileUploadDialogProps) 
               type="file"
               multiple
               className="hidden"
-              onChange={(e) => addFiles(e.target.files)}
+              onChange={(e) => handleAddFiles(e.target.files)}
             />
           </div>
 
           {/* File list */}
-          {files.length > 0 && (
-            <ScrollArea className="max-h-[200px]">
-              <div className="space-y-2">
-                {files.map((file) => (
+          {selectedFiles.length > 0 && (
+            <div className="max-h-[200px] w-full overflow-y-auto pr-2 border rounded-md">
+              <div className="space-y-2 p-1">
+                {selectedFiles.map((file, i) => (
                   <div
-                    key={file.id}
-                    className="flex items-center gap-3 rounded-md border p-2.5"
+                    key={i}
+                    className="grid grid-cols-[auto_1fr_auto] gap-3 items-center rounded-md border p-2.5 max-w-full"
                   >
                     <File className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <div className="flex-1 min-w-0 space-y-1">
-                      <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center justify-between gap-2 w-full">
                         <p className="text-sm font-medium truncate">
                           {file.name}
                         </p>
-                        <span className="text-xs text-muted-foreground shrink-0">
+                        <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
                           {formatBytes(file.size)}
                         </span>
                       </div>
-                      {(file.status === "uploading" ||
-                        file.status === "complete") && (
-                        <Progress
-                          value={file.progress}
-                          className="h-1"
-                        />
-                      )}
                     </div>
-                    {!isUploading && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 shrink-0"
-                        onClick={() => removeFile(file.id)}
-                      >
-                        <X className="h-3 w-3" />
-                        <span className="sr-only">Remove</span>
-                      </Button>
-                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 cursor-pointer"
+                      onClick={() => removeFile(i)}
+                    >
+                      <X className="h-3 w-3" />
+                      <span className="sr-only">Remove</span>
+                    </Button>
                   </div>
                 ))}
               </div>
-            </ScrollArea>
-          )}
-
-          {/* Actions */}
+            </div>
+          )} {/* Actions */}
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
-              {files.length > 0
-                ? `${files.length} file${files.length > 1 ? "s" : ""} selected`
+              {selectedFiles.length > 0
+                ? `${selectedFiles.length} file${selectedFiles.length > 1 ? "s" : ""} selected`
                 : "No files selected"}
             </p>
             <div className="flex gap-2">
               <Button
                 variant="outline"
                 onClick={() => handleClose(false)}
-                disabled={isUploading}
               >
                 Cancel
               </Button>
               <Button
-                onClick={simulateUpload}
-                disabled={pendingCount === 0 || isUploading}
+                onClick={handleUpload}
+                disabled={selectedFiles.length === 0}
+                className="cursor-pointer"
               >
-                {isUploading ? "Uploading..." : "Upload"}
+                Upload
               </Button>
             </div>
           </div>
