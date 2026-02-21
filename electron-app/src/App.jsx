@@ -9,6 +9,7 @@ import {
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import TopBar from "./components/TopBar";
 import Sidebar from "./components/Sidebar";
+import TransferStatus from "./components/TransferStatus";
 import BucketsPage from "./pages/BucketsPage";
 import FilesPage from "./pages/FilesPage";
 import LoginPage from "./pages/LoginPage";
@@ -38,6 +39,7 @@ const Layout = () => {
           </Routes>
         </div>
       </div>
+      <TransferStatus />
     </div>
   );
 };

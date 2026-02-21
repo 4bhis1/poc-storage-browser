@@ -5,7 +5,7 @@ import prisma from '@/lib/prisma';
 
 export async function POST(request: NextRequest) {
     try {
-        const { email, password } = await request.json();
+        const { email, password, platform } = await request.json();
 
         if (!email || !password) {
             return NextResponse.json({ error: 'Missing email or password' }, { status: 400 });
@@ -38,8 +38,8 @@ export async function POST(request: NextRequest) {
             name: user.name
         };
 
-        const accessToken = await createAccessToken(payload);
-        const refreshToken = await createRefreshToken(payload);
+        const accessToken = await createAccessToken(payload, platform);
+        const refreshToken = await createRefreshToken(payload, platform);
 
         // Set Refresh Token in HTTP-only cookie
         const response = NextResponse.json({

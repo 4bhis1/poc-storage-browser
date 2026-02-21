@@ -1,6 +1,5 @@
 const { Pool } = require('pg');
-const dotenv = require('dotenv');
-dotenv.config();
+require('dotenv').config();
 
 const pool = new Pool({
   user: process.env.DB_USER || 'agent_user',
@@ -17,8 +16,6 @@ const initDB = async () => {
     try {
         await client.query('BEGIN');
 
-        // Mirroring Web App Schema (Simplified for Agent)
-        
         // Tenants
         await client.query(`
             CREATE TABLE IF NOT EXISTS "Tenant" (
@@ -34,12 +31,17 @@ const initDB = async () => {
             CREATE TABLE IF NOT EXISTS "Account" (
                 "id" TEXT PRIMARY KEY,
                 "name" TEXT NOT NULL,
+                "awsAccessKeyId" TEXT,
+                "awsSecretAccessKey" TEXT,
                 "tenantId" TEXT NOT NULL REFERENCES "Tenant"("id"),
                 "isActive" BOOLEAN DEFAULT true,
                 "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
         `);
+        // Handle migration if table already existed
+        await client.query(`ALTER TABLE "Account" ADD COLUMN IF NOT EXISTS "awsAccessKeyId" TEXT;`);
+        await client.query(`ALTER TABLE "Account" ADD COLUMN IF NOT EXISTS "awsSecretAccessKey" TEXT;`);
 
         // Buckets
         await client.query(`
@@ -74,29 +76,35 @@ const initDB = async () => {
             );
         `);
 
-        // Sync State (To track last sync time per bucket/global)
+        // Sync State
         await client.query(`
             CREATE TABLE IF NOT EXISTS "SyncState" (
                 "id" TEXT PRIMARY KEY,
-                "resourceId" TEXT UNIQUE NOT NULL, -- e.g., 'global_bucket_list' or specific bucket ID
+                "resourceId" TEXT UNIQUE NOT NULL,
                 "lastSyncTimestamp" TIMESTAMP,
                 "status" TEXT
             );
         `);
 
         await client.query('COMMIT');
-        console.log('Local Database Initialized Successfully');
+        console.log('[Database] Initialized Successfully');
     } catch (e) {
         await client.query('ROLLBACK');
-        console.error('Failed to initialize local database', e);
+        console.error('[Database] Initialization Failed', e);
         throw e;
     } finally {
         client.release();
     }
 };
 
-if (require.main === module) {
-    initDB().catch(console.error);
-}
+const closeDB = async () => {
+    await pool.end();
+    console.log('[Database] Pool closed');
+};
 
-module.exports = { query, initDB };
+module.exports = { 
+    query, 
+    initDB, 
+    closeDB,
+    pool 
+};

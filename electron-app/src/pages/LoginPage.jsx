@@ -48,7 +48,7 @@ export default function LoginPage() {
                 {error}
               </div>
             )}
-            <div className="space-y-2">
+            <div className="my-4">
               <Label htmlFor="email">Email</Label>
               <Input
                 id="email"
@@ -59,7 +59,7 @@ export default function LoginPage() {
                 required
               />
             </div>
-            <div className="space-y-2">
+            <div className="my-4">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Password</Label>
               </div>

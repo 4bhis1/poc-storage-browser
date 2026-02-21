@@ -1,532 +1,253 @@
-const { S3Client, ListObjectsV2Command, GetObjectCommand, DeleteObjectCommand, PutObjectCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
-const { Upload } = require('@aws-sdk/lib-storage');
-const fs = require('fs');
+const localManager = require('./local');
+const uploadManager = require('./transfers/upload');
+const downloadManager = require('./transfers/download');
+const statusManager = require('./transfers/status');
+const database = require('./database');
+const syncManager = require('./sync');
+const deleteManager = require('./transfers/delete');
 const path = require('path');
-const fsPromises = require('fs/promises');
+const fs = require('fs/promises');
+const fsSync = require('fs');
 const os = require('os');
-const { createDecipheriv } = require("crypto");
-const { Pool } = require("pg");
-require('dotenv').config();
+const archiver = require('archiver');
 
-const ENCRYPTION_KEY = Buffer.from("dfa35e10f81315ea9e69e3dff3f7a4ac6096a0828052aaf09f38bc11600d4a53", "hex");
-const ALGORITHM = "aes-256-gcm";
-
-function decrypt(text) {
-    if (!text) return text;
-    const parts = text.split(":");
-    if (parts.length !== 3) return text;
-    const [ivHex, encryptedHex, authTagHex] = parts;
-    const iv = Buffer.from(ivHex, "hex");
-    const authTag = Buffer.from(authTagHex, "hex");
-    const decipher = createDecipheriv(ALGORITHM, ENCRYPTION_KEY, iv);
-    decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(encryptedHex, "hex", "utf8");
-    decrypted += decipher.final("utf8");
-    return decrypted;
-}
-
-const globalDbPool = new Pool({
-  connectionString: "postgresql://myuser:mypassword@localhost:5435/filemanagement?schema=public"
-});
-
-class BackendManager {
+class BackendCentral {
     constructor() {
-        this.s3Client = null;
-        this.bucketName = process.env.AWS_BUCKET_NAME || 'my-bucket';
-        this.region = process.env.AWS_REGION || 'us-east-1';
-        this.isSyncing = false; // Guard against sync loops
-
-        this.initS3();
-    }
-
-    initS3() {
-        if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
-            const credentials = {
-                accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-                secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-            };
-            if (process.env.AWS_SESSION_TOKEN) {
-                credentials.sessionToken = process.env.AWS_SESSION_TOKEN;
-            }
-            this.s3Client = new S3Client({ region: this.region, credentials });
-            console.log('S3 Client Initialized with region:', this.region);
-        } else {
-            console.warn('AWS Credentials not found. S3 Sync will be skipped.');
-        }
-    }
-
-    async uploadFileToS3(filePath, s3Key, overrideBucket = null) {
-        if (!this.s3Client) return;
-        const targetBucket = overrideBucket || this.bucketName;
-        try {
-            const fileStream = fs.createReadStream(filePath);
-            const upload = new Upload({
-                client: this.s3Client,
-                params: { Bucket: targetBucket, Key: s3Key, Body: fileStream }
-            });
-            await upload.done();
-            console.log(`[S3] Uploaded: s3://${targetBucket}/${s3Key}`);
-            return true;
-        } catch (error) {
-            console.error('S3 Upload Error:', error);
-            throw error;
-        }
-    }
-
-    async uploadWithPresigned(filePath, s3Key, bucketId, bucketName, mimeType) {
-        const axios = require('axios');
-        
-        try {
-            // 1. Fetch AWS Credentials from Global Database
-            const dbRes = await globalDbPool.query(`
-                SELECT a."awsAccessKeyId", a."awsSecretAccessKey", b.region, b.name 
-                FROM "Bucket" b 
-                JOIN "Account" a ON b."accountId" = a.id 
-                WHERE b.id = $1
-            `, [bucketId]);
-
-            if (dbRes.rows.length === 0) {
-                throw new Error("Bucket/Account not found in Global Database");
-            }
-
-            const accountData = dbRes.rows[0];
-            if (!accountData.awsAccessKeyId || !accountData.awsSecretAccessKey) {
-                throw new Error("AWS credentials missing for this account");
-            }
-
-            // 2. Initialize localized S3Client using Decrypted Tokens
-            const s3 = new S3Client({
-                region: accountData.region,
-                credentials: {
-                    accessKeyId: decrypt(accountData.awsAccessKeyId),
-                    secretAccessKey: decrypt(accountData.awsSecretAccessKey),
-                },
-            });
-
-            // 3. Generate Presigned URL natively
-            const command = new PutObjectCommand({
-                Bucket: accountData.name,
-                Key: s3Key,
-                ContentType: mimeType,
-            });
-
-            const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
-            if (!url) throw new Error('Failed to generate local presigned URL');
-
-            // 4. Upload File natively
-            const stat = await fsPromises.stat(filePath);
-            const fileStream = fs.createReadStream(filePath);
-
-            await axios.put(url, fileStream, {
-                headers: {
-                    'Content-Type': mimeType,
-                    'Content-Length': stat.size
-                },
-                maxBodyLength: Infinity,
-                maxContentLength: Infinity
-            });
-            console.log(`[S3] Uploaded via Localized Presign logic: s3://${bucketName}/${s3Key}`);
-            return true;
-        } catch (error) {
-            console.error('Localized Data Upload Error:', error?.response?.data || error.message);
-            throw error;
-        }
+        this.local = localManager;
+        this.upload = uploadManager;
+        this.download = downloadManager;
+        this.status = statusManager;
+        this.db = database;
+        this.sync = syncManager;
+        this.auth = require('./auth');
+        this.delete = deleteManager;
     }
 
     /**
-     * Called by chokidar watcher when a file is added locally.
-     * Skipped during sync to prevent loops.
+     * Watcher Handlers
      */
-    async onLocalFileAdded(filePath, localRootPath) {
-        if (this.isSyncing) {
-            console.log(`[Watcher] Skipping auto-upload during sync: ${filePath}`);
-            return;
-        }
-
-        let stat;
+    async onLocalFileAdded(filePath, rootPath) {
         try {
-            stat = await fsPromises.stat(filePath);
-            if (stat.isDirectory()) return; // skip folders
-        } catch(e) { return; }
+            const stat = await fsSync.statSync(filePath);
+            if (stat.isDirectory()) {
+                console.log(`[Watcher] New directory ignored (S3 uses prefixes): ${filePath}`);
+                return;
+            }
 
-        const relativePath = path.relative(localRootPath, filePath).split(path.sep).join('/');
-        const parts = relativePath.split('/');
-        if (parts.length < 2) return; // ignores files not inside a bucket folder
+            const { bucketId, s3Key } = await this._parsePath(filePath, rootPath);
+            if (!bucketId || !s3Key) {
+                console.log(`[Watcher] Skipped ${filePath} (Not in a valid bucket folder)`);
+                return;
+            }
+
+            console.log(`[Watcher] Auto-uploading to S3: bucket=${bucketId}, key=${s3Key}`);
+            await this.upload.uploadWithBucketId(bucketId, filePath, s3Key);
+        } catch (err) {
+            console.error('[Watcher] Auto-upload failed:', err.message);
+        }
+    }
+
+    async onLocalFileRemoved(filePath, rootPath) {
+        console.log(`[Watcher] File removal detected: ${filePath}`);
+        try {
+            const { bucketId, s3Key } = await this._parsePath(filePath, rootPath);
+            if (!bucketId || !s3Key) return;
+            console.log(`[Watcher] Auto-deleting from S3: key=${s3Key}`);
+            await this.delete.deleteFromS3(bucketId, s3Key);
+        } catch (err) {
+            console.error('[Watcher] Auto-delete failed:', err.message);
+        }
+    }
+
+    async onLocalDirRemoved(dirPath, rootPath) {
+        try {
+            const { bucketId, s3Key } = await this._parsePath(dirPath, rootPath);
+            if (!bucketId || !s3Key) return;
+            console.log(`[Backend] Auto-deleting folder: ${s3Key}`);
+            await this.delete.deleteFolderFromS3(bucketId, s3Key);
+        } catch (err) {
+            console.error('[Backend] Auto-folder-delete failed:', err.message);
+        }
+    }
+
+    async _parsePath(localPath, rootPath) {
+        const relative = path.relative(rootPath, localPath);
+        const parts = relative.split(path.sep);
+        if (parts.length < 1) return { bucketId: null };
 
         const bucketName = parts[0];
         const s3Key = parts.slice(1).join('/');
 
-        console.log(`[Watcher] Auto-uploading new file via Presigned URL: ${s3Key} to bucket ${bucketName}`);
-        try {
-            // Fetch bucket lookup first to use Presigned URL logic
-            const { query } = require('../src/lib/db');
-            const bucketRes = await query('SELECT id FROM "Bucket" WHERE name = $1', [bucketName]);
-            if (bucketRes.rows.length === 0) {
-                 console.log(`[Watcher] Bucket ${bucketName} not in DB, upload skipped.`);
-                 return;
-            }
-            const bucketId = bucketRes.rows[0].id;
-
-            const mimeType = 'application/octet-stream'; 
-
-            // Upload via Central API (Presigned URL)
-            await this.uploadWithPresigned(filePath, s3Key, bucketId, bucketName, mimeType);
-
-            let parentId = null;
-            if (parts.length > 2) {
-                 const parentKey = parts.slice(1, -1).join('/');
-                 const parentRes = await query('SELECT id FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [parentKey, bucketId]);
-                 if (parentRes.rows.length > 0) parentId = parentRes.rows[0].id;
-            }
-
-            const crypto = require('crypto');
-            const fileId = crypto.randomUUID();
-            const fileName = path.basename(filePath);
-
-            await query(`
-                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "parentId", "createdAt", "updatedAt", "isSynced")
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW(), true)
-                ON CONFLICT (id) DO UPDATE SET size = EXCLUDED.size, "updatedAt" = EXCLUDED."updatedAt"
-            `, [fileId, fileName, s3Key, false, stat.size, mimeType, bucketId, parentId]);
-            console.log(`[Watcher] Local DB updated for ${s3Key}`);
-        } catch (err) {
-            console.error(`[Watcher] Auto-upload failed for ${relativePath}:`, err.message);
-        }
+        const dbRes = await this.db.query('SELECT id FROM "Bucket" WHERE name = $1', [bucketName]);
+        if (dbRes.rows.length === 0) return { bucketId: null };
+        
+        return { bucketId: dbRes.rows[0].id, s3Key };
     }
 
     /**
-     * Builds a fresh S3Client using credentials from the Global DB for a given bucketId.
+     * Specialized Zip + Upload logic requested by user.
      */
-    async getS3ClientForBucket(bucketId) {
-        const dbRes = await globalDbPool.query(`
-            SELECT a."awsAccessKeyId", a."awsSecretAccessKey", b.region, b.name
-            FROM "Bucket" b
-            JOIN "Account" a ON b."accountId" = a.id
-            WHERE b.id = $1
-        `, [bucketId]);
+    async uploadItems(items, destDir, shouldZip) {
+        const results = [];
 
-        if (dbRes.rows.length === 0) throw new Error(`Bucket/Account not found in Global DB for id: ${bucketId}`);
-
-        const accountData = dbRes.rows[0];
-        if (!accountData.awsAccessKeyId || !accountData.awsSecretAccessKey) {
-            throw new Error('AWS credentials missing for this account');
-        }
-
-        const s3 = new S3Client({
-            region: accountData.region,
-            credentials: {
-                accessKeyId: decrypt(accountData.awsAccessKeyId),
-                secretAccessKey: decrypt(accountData.awsSecretAccessKey),
-            },
+        // Collect all folder items to decide zip behaviour
+        const folders = items.filter(p => {
+            try { return fsSync.statSync(p).isDirectory(); } catch { return false; }
+        });
+        const files = items.filter(p => {
+            try { return fsSync.statSync(p).isFile(); } catch { return false; }
         });
 
-        return { s3, bucketName: accountData.name };
-    }
-
-    /**
-     * Called by chokidar when a FILE is deleted locally.
-     * Removes from S3 and local DB.
-     */
-    async onLocalFileRemoved(filePath, localRootPath) {
-        if (this.isSyncing) {
-            console.log(`[Watcher] Skipping auto-delete during sync: ${filePath}`);
-            return;
-        }
-
-        const relativePath = path.relative(localRootPath, filePath).split(path.sep).join('/');
-        const parts = relativePath.split('/');
-        if (parts.length < 2) return;
-
-        const bucketName = parts[0];
-        const s3Key = parts.slice(1).join('/');
-
-        console.log(`[Watcher] Auto-deleting file: ${s3Key} from bucket ${bucketName}`);
-        try {
-            const { query } = require('../src/lib/db');
-
-            // 1. Find bucket in local DB
-            const bucketRes = await query('SELECT id FROM "Bucket" WHERE name = $1', [bucketName]);
-            if (bucketRes.rows.length === 0) {
-                console.log(`[Watcher] Bucket ${bucketName} not in local DB, delete skipped.`);
-                return;
-            }
-            const bucketId = bucketRes.rows[0].id;
-
-            // 2. Get fresh S3 client using decrypted credentials from Global DB
-            const { s3, bucketName: s3BucketName } = await this.getS3ClientForBucket(bucketId);
-
-            // 3. Delete from S3
-            await s3.send(new DeleteObjectCommand({ Bucket: s3BucketName, Key: s3Key }));
-            console.log(`[S3] Deleted: s3://${s3BucketName}/${s3Key}`);
-
-            // 4. Delete from local DB
-            await query('DELETE FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [s3Key, bucketId]);
-            console.log(`[Watcher] Local DB: removed ${s3Key}`);
-        } catch (err) {
-            console.error(`[Watcher] Auto-delete failed for ${relativePath}:`, err.message);
-        }
-    }
-
-    /**
-     * Called by chokidar when a DIRECTORY is deleted locally.
-     * Removes all objects under that prefix from S3 and local DB.
-     */
-    async onLocalDirRemoved(dirPath, localRootPath) {
-        if (this.isSyncing) {
-            console.log(`[Watcher] Skipping auto-delete (dir) during sync: ${dirPath}`);
-            return;
-        }
-
-        const relativePath = path.relative(localRootPath, dirPath).split(path.sep).join('/');
-        const parts = relativePath.split('/');
-        if (parts.length < 2) return; // top-level bucket folder — don't delete the whole bucket
-
-        const bucketName = parts[0];
-        const s3Prefix = parts.slice(1).join('/') + '/';
-
-        console.log(`[Watcher] Auto-deleting dir prefix: ${s3Prefix} from bucket ${bucketName}`);
-        try {
-            const { query } = require('../src/lib/db');
-
-            // 1. Find bucket in local DB
-            const bucketRes = await query('SELECT id FROM "Bucket" WHERE name = $1', [bucketName]);
-            if (bucketRes.rows.length === 0) {
-                console.log(`[Watcher] Bucket ${bucketName} not in local DB, dir delete skipped.`);
-                return;
-            }
-            const bucketId = bucketRes.rows[0].id;
-
-            // 2. Get fresh S3 client
-            const { s3, bucketName: s3BucketName } = await this.getS3ClientForBucket(bucketId);
-
-            // 3. List all S3 objects under the prefix then delete them
-            const listRes = await s3.send(new ListObjectsV2Command({
-                Bucket: s3BucketName,
-                Prefix: s3Prefix,
-            }));
-
-            for (const obj of (listRes.Contents || [])) {
-                await s3.send(new DeleteObjectCommand({ Bucket: s3BucketName, Key: obj.Key }));
-                console.log(`[S3] Deleted (dir): s3://${s3BucketName}/${obj.Key}`);
-            }
-
-            // 4. Also attempt deleting the folder placeholder key itself (some setups store it)
-            await s3.send(new DeleteObjectCommand({ Bucket: s3BucketName, Key: s3Prefix })).catch(() => {});
-
-            // 5. Remove all matching entries from local DB
-            await query(
-                'DELETE FROM "FileObject" WHERE ("key" LIKE $1 OR "key" = $2) AND "bucketId" = $3',
-                [s3Prefix + '%', s3Prefix.slice(0, -1), bucketId]
-            );
-            console.log(`[Watcher] Local DB: removed all entries under prefix ${s3Prefix}`);
-        } catch (err) {
-            console.error(`[Watcher] Auto-delete (dir) failed for ${relativePath}:`, err.message);
-        }
-    }
-
-    async getRecursiveFiles(dir, rootDir = dir, excludeDirs = []) {
-        let results = [];
-        try {
-            const list = await fsPromises.readdir(dir, { withFileTypes: true });
-            for (const entry of list) {
-                const fullPath = path.join(dir, entry.name);
-                const relativePath = path.relative(rootDir, fullPath).split(path.sep).join('/');
-
-                if (entry.isDirectory()) {
-                    // Skip excluded directories (prevents self-copy loops)
-                    if (excludeDirs.some(ex => fullPath.startsWith(ex))) continue;
-                    const subRes = await this.getRecursiveFiles(fullPath, rootDir, excludeDirs);
-                    results = results.concat(subRes);
-                } else {
-                    results.push({ fullPath, relativePath });
+        // If shouldZip AND there are folders, zip each folder individually
+        if (shouldZip && folders.length > 0) {
+            for (const folderPath of folders) {
+                try {
+                    const folderName = path.basename(folderPath);
+                    const zipName = `${folderName}.zip`;
+                    const zipPath = await this._zipFolder(folderPath, destDir, zipName);
+                    results.push({ success: true, path: zipPath });
+                } catch (err) {
+                    console.error(`[Backend] Zip failed for ${folderPath}:`, err);
+                    results.push({ success: false, path: folderPath, error: err.message });
                 }
             }
-        } catch (err) {
-            console.error(`[getRecursiveFiles] Error reading ${dir}:`, err.message);
+            // Plain files always copied normally (no zip for individual files)
+            for (const filePath of files) {
+                try {
+                    const stat = await fs.stat(filePath);
+                    const finalDest = path.join(destDir, path.basename(filePath));
+                    await this._copyFileWithProgress(filePath, finalDest, stat.size, path.basename(filePath));
+                    results.push({ success: true, path: finalDest });
+                } catch (err) {
+                    results.push({ success: false, path: filePath, error: err.message });
+                }
+            }
+            return results;
+        }
+
+        // No zip: copy everything as-is
+        for (const itemPath of items) {
+            try {
+                const stat = await fs.stat(itemPath);
+                const itemName = path.basename(itemPath);
+                const finalDest = path.join(destDir, itemName);
+
+                if (stat.isDirectory()) {
+                    await fs.mkdir(finalDest, { recursive: true });
+                    await this._recursiveCopy(itemPath, finalDest);
+                    results.push({ success: true, path: finalDest });
+                } else {
+                    await this._copyFileWithProgress(itemPath, finalDest, stat.size, itemName);
+                    results.push({ success: true, path: finalDest });
+                }
+            } catch (err) {
+                console.error(`[Backend] Upload failed for ${itemPath}:`, err);
+                results.push({ success: false, path: itemPath, error: err.message });
+            }
         }
         return results;
     }
 
-    async syncFromS3(localRootPath, onProgress) {
-        if (!this.s3Client) return { success: false, message: 'S3 Client not initialized' };
-        if (this.isSyncing) return { success: false, message: 'Sync already in progress' };
+    async _zipFolder(src, dest, zipName) {
+        // Write to temp directory first, then move atomically to FMS folder.
+        // This prevents chokidar from seeing a partial zip file.
+        const tempZip = path.join(os.tmpdir(), `fms_${Date.now()}_${zipName}`);
+        const finalZip = path.join(dest, zipName);
+        const folderName = path.basename(src); // preserve folder name inside zip
+        const transferId = `zip-${Date.now()}-${zipName}`;
 
-        this.isSyncing = true;
-        try {
-            console.log(`[Sync] Starting Bidirectional Sync: ${this.bucketName} <-> ${localRootPath}`);
-            if (onProgress) onProgress({ type: 'info', message: 'Fetching S3 bucket list...' });
+        this.status.startTransfer(transferId, zipName, 'zip');
 
-            const { Contents } = await this.s3Client.send(new ListObjectsV2Command({ Bucket: this.bucketName }));
-            const s3Items = (Contents || []).filter(item => {
-                // Filter out any nested FMS/FMS/... garbage keys from S3
-                const parts = item.Key.split('/');
-                // Skip keys that look like infinite recursion artifacts
-                const uniqueParts = new Set(parts.filter(p => p));
-                if (uniqueParts.size === 1 && parts.length > 3) return false;
-                return true;
-            });
-            const s3Keys = new Set(s3Items.map(item => item.Key));
-
-            let downloadCount = 0;
-            let uploadCount = 0;
-            const { pipeline } = require('stream/promises');
-
-            // --- Phase 1: Download (S3 → Local) ---
-            if (onProgress) onProgress({ type: 'info', message: `Found ${s3Items.length} files in S3. Checking local...` });
-
-            for (const item of s3Items) {
-                const localFilePath = path.join(localRootPath, item.Key);
-                const localDir = path.dirname(localFilePath);
-                await fsPromises.mkdir(localDir, { recursive: true });
-
-                try {
-                    await fsPromises.access(localFilePath);
-                    continue; // Already exists locally
-                } catch {
-                    // Missing locally — download it
-                }
-
-                console.log(`[Sync-Down] ${item.Key}`);
-                if (onProgress) onProgress({ type: 'download', filename: item.Key, status: 'active' });
-
-                const data = await this.s3Client.send(new GetObjectCommand({ Bucket: this.bucketName, Key: item.Key }));
-                await pipeline(data.Body, fs.createWriteStream(localFilePath));
-
-                if (onProgress) onProgress({ type: 'download', filename: item.Key, status: 'done' });
-                downloadCount++;
-            }
-
-            // --- Phase 2: Upload (Local → S3) ---
-            if (onProgress) onProgress({ type: 'info', message: 'Scanning local files for upload...' });
-            const localFiles = await this.getRecursiveFiles(localRootPath);
-
-            for (const file of localFiles) {
-                if (!s3Keys.has(file.relativePath)) {
-                    console.log(`[Sync-Up] ${file.relativePath}`);
-                    if (onProgress) onProgress({ type: 'upload', filename: file.relativePath, status: 'active' });
-
-                    await this.uploadFileToS3(file.fullPath, file.relativePath);
-
-                    if (onProgress) onProgress({ type: 'upload', filename: file.relativePath, status: 'done' });
-                    uploadCount++;
-                }
-            }
-
-            const summary = `Sync done. ↓ ${downloadCount} downloaded, ↑ ${uploadCount} uploaded.`;
-            console.log(`[Sync] ${summary}`);
-            // Signal completion — active: false stops the spinner
-            if (onProgress) onProgress({ type: 'complete', message: summary, downloadCount, uploadCount });
-            return { success: true, message: summary, downloadCount, uploadCount };
-
-        } catch (error) {
-            console.error('[Sync] Error:', error);
-            if (onProgress) onProgress({ type: 'error', message: error.message });
-            return { success: false, message: error.message };
-        } finally {
-            this.isSyncing = false;
-        }
-    }
-
-    /**
-     * Zip a folder into a temp directory first, then move to destination.
-     * This prevents the watcher from picking up an incomplete zip.
-     */
-    async zipFolderToTemp(folderPath, destDir, zipName) {
-        const archiver = require('archiver');
-        const tempDir = path.join(os.tmpdir(), '_fms_temp');
-        await fsPromises.mkdir(tempDir, { recursive: true });
-
-        const tempZipPath = path.join(tempDir, zipName);
-        const finalZipPath = path.join(destDir, zipName);
-
-        console.log(`[Zip] Creating zip in temp: ${tempZipPath}`);
-        const output = fs.createWriteStream(tempZipPath);
+        const output = fsSync.createWriteStream(tempZip);
         const archive = archiver('zip', { zlib: { level: 6 } });
+
+        // Track size for progress
+        let totalBytes = 0;
+        let processedBytes = 0;
+        try {
+            totalBytes = await this._dirSize(src);
+        } catch { totalBytes = 0; }
+
+        archive.on('data', (chunk) => {
+            // archiver doesn't expose input bytes easily; use entry events
+        });
+        archive.on('entry', (entry) => {
+            processedBytes += entry.stats?.size || 0;
+            if (totalBytes > 0) {
+                const pct = Math.min(99, (processedBytes / totalBytes) * 100);
+                this.status.updateProgress(transferId, pct);
+            }
+        });
 
         await new Promise((resolve, reject) => {
             output.on('close', resolve);
             archive.on('error', reject);
             archive.pipe(output);
-            archive.directory(folderPath, false);
+            // ✅ FIX: use folderName as the prefix so zip contains "myFolder/file.txt"
+            //    not just "file.txt" at the root level
+            archive.directory(src, folderName);
             archive.finalize();
         });
 
-        console.log(`[Zip] Moving zip to destination: ${finalZipPath}`);
-        await fsPromises.rename(tempZipPath, finalZipPath);
-        return finalZipPath;
+        // Move from tmp → FMS folder (atomic rename — watcher fires only once on final path)
+        await fs.rename(tempZip, finalZip);
+        this.status.completeTransfer(transferId, 'done');
+        console.log(`[Backend] Zipped folder "${folderName}" → ${zipName} (${(fsSync.statSync(finalZip).size / 1024).toFixed(1)} KB)`);
+        return finalZip;
     }
 
-    async uploadItems(items, currentDirectory, shouldZip) {
-        const results = [];
-        for (const itemPath of items) {
-            if (!itemPath) {
-                results.push({ success: false, error: 'Invalid path (undefined)' });
-                continue;
-            }
-            try {
-                const stat = await fsPromises.stat(itemPath);
-                const itemName = path.basename(itemPath);
-                const destinationPath = path.join(currentDirectory, itemName);
-
-                // Safety check: prevent copying a folder into itself
-                const normalizedSrc = path.resolve(itemPath);
-                const normalizedDest = path.resolve(destinationPath);
-                if (normalizedDest.startsWith(normalizedSrc)) {
-                    console.warn(`[Upload] Skipping self-copy: ${itemPath} -> ${destinationPath}`);
-                    results.push({ success: false, path: itemPath, error: 'Cannot copy folder into itself' });
-                    continue;
-                }
-
-                if (stat.isDirectory()) {
-                    if (shouldZip) {
-                        const zipName = `${itemName}.zip`;
-                        // Zip to temp first, then move — watcher will auto-upload when it lands
-                        const finalZipPath = await this.zipFolderToTemp(itemPath, currentDirectory, zipName);
-                        console.log(`[Upload] Zip ready at: ${finalZipPath}`);
-                        results.push({ success: true, path: finalZipPath });
-                    } else {
-                        await fsPromises.mkdir(destinationPath, { recursive: true });
-                        await this.recursiveCopy(itemPath, destinationPath);
-                        results.push({ success: true, path: destinationPath });
-                    }
-                } else {
-                    // File: copy to destination — watcher will auto-upload
-                    await fsPromises.copyFile(itemPath, destinationPath);
-                    results.push({ success: true, path: destinationPath });
-                }
-            } catch (error) {
-                console.error(`[Upload] Error for ${itemPath}:`, error.message);
-                results.push({ success: false, path: itemPath, error: error.message });
-            }
-        }
-        return results;
-    }
-
-    async recursiveCopy(sourceDir, targetDir) {
-        // Safety: never copy into self
-        const normalizedSrc = path.resolve(sourceDir);
-        const normalizedDest = path.resolve(targetDir);
-        if (normalizedDest.startsWith(normalizedSrc)) {
-            throw new Error(`Cannot copy directory into itself: ${sourceDir} -> ${targetDir}`);
-        }
-
-        const entries = await fsPromises.readdir(sourceDir, { withFileTypes: true });
-        for (const entry of entries) {
-            const src = path.join(sourceDir, entry.name);
-            const dest = path.join(targetDir, entry.name);
-            if (entry.isDirectory()) {
-                await fsPromises.mkdir(dest, { recursive: true });
-                await this.recursiveCopy(src, dest);
+    /** Sum all file sizes under a directory recursively */
+    async _dirSize(dirPath) {
+        let total = 0;
+        const entries = await fs.readdir(dirPath, { withFileTypes: true });
+        for (const e of entries) {
+            const full = path.join(dirPath, e.name);
+            if (e.isDirectory()) {
+                total += await this._dirSize(full);
             } else {
-                await fsPromises.copyFile(src, dest);
+                const s = await fs.stat(full);
+                total += s.size;
             }
         }
+        return total;
     }
 
-    async handleFileDrop(droppedPaths, currentDirectory) {
-        return this.uploadItems(droppedPaths, currentDirectory, false);
+    async _copyFileWithProgress(src, dest, size, name) {
+        const transferId = `copy-${Date.now()}-${name}`;
+        this.status.startTransfer(transferId, name, 'copy', size);
+        
+        const srcStream = fsSync.createReadStream(src);
+        const destStream = fsSync.createWriteStream(dest);
+        let copied = 0;
+
+        srcStream.on('data', (chunk) => {
+            copied += chunk.length;
+            this.status.updateProgress(transferId, (copied / size) * 100, copied);
+        });
+
+        await new Promise((resolve, reject) => {
+            destStream.on('finish', resolve);
+            destStream.on('error', reject);
+            srcStream.on('error', reject);
+            srcStream.pipe(destStream);
+        });
+
+        this.status.completeTransfer(transferId, 'done');
+    }
+
+    async _recursiveCopy(src, dest) {
+        const entries = await fs.readdir(src, { withFileTypes: true });
+        for (const entry of entries) {
+            const s = path.join(src, entry.name);
+            const d = path.join(dest, entry.name);
+            if (entry.isDirectory()) {
+                await fs.mkdir(d, { recursive: true });
+                await this._recursiveCopy(s, d);
+            } else {
+                await fs.copyFile(s, d);
+            }
+        }
     }
 }
 
-module.exports = new BackendManager();
+module.exports = new BackendCentral();
