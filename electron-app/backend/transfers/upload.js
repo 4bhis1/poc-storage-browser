@@ -7,6 +7,7 @@ const fsPromises = require('fs/promises');
 const { createDecipheriv } = require("crypto");
 const statusManager = require('./status');
 const database = require('../database');
+const syncHistory = require('../syncHistory');
 
 const ENCRYPTION_KEY = Buffer.from(process.env.ENCRYPTION_KEY || "", "hex");
 const ALGORITHM = "aes-256-gcm";
@@ -69,10 +70,12 @@ class UploadManager {
 
             await upload.done();
             statusManager.completeTransfer(transferId, 'done');
+            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'SUCCESS');
             return true;
         } catch (error) {
             console.error('[UploadManager] S3 Upload Error:', error.message);
             statusManager.completeTransfer(transferId, 'error');
+            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'FAILED', error.message);
             throw error;
         }
     }

@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // 5. Sync Engine
   initSync: (token) => ipcRenderer.invoke('init-sync', token),
   stopSync: () => ipcRenderer.invoke('stop-sync'),
+  forceSync: () => ipcRenderer.invoke('force-sync'),
   onAuthExpired: (callback) => {
     const sub = () => callback();
     ipcRenderer.on('auth-expired', sub);
@@ -58,6 +59,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // 6. DB Helpers
   dbQuery: (text, params) => ipcRenderer.invoke('db-query', { text, params }),
+  searchFiles: (query) => ipcRenderer.invoke('search-files', { query }),
+  getLocalSyncActivities: () => ipcRenderer.invoke('get-local-sync-activities'),
 
   // 7. Watcher Events
   onFileChange: (event, callback) => {

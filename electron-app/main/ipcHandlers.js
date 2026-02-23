@@ -78,6 +78,44 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
         backend.sync.stop();
         return true;
     });
+
+    ipcMain.handle('force-sync', () => {
+        backend.sync.runSync();
+        return true;
+    });
+
+    // 6. Full-text search across all local FileObjects
+    ipcMain.handle('search-files', async (event, { query }) => {
+        if (!query || query.trim().length < 1) return [];
+        try {
+            const result = await backend.db.query(
+                `SELECT fo.id, fo.name, fo.key, fo."isFolder", fo.size, fo."mimeType", fo."bucketId", b.name AS "bucketName"
+                 FROM "FileObject" fo
+                 JOIN "Bucket" b ON fo."bucketId" = b.id
+                 WHERE fo.name ILIKE $1
+                 ORDER BY fo."isFolder" DESC, fo.name ASC
+                 LIMIT 30`,
+                [`%${query.trim()}%`]
+            );
+            return result.rows;
+        } catch (err) {
+            console.error('[IPC] search-files error:', err.message);
+            return [];
+        }
+    });
+
+    // 7. Read local sync activities directly from local DB
+    ipcMain.handle('get-local-sync-activities', async () => {
+        try {
+            const result = await backend.db.query(
+                `SELECT * FROM "LocalSyncActivity" ORDER BY "createdAt" DESC LIMIT 200`
+            );
+            return result.rows;
+        } catch (err) {
+            console.error('[IPC] get-local-sync-activities error:', err.message);
+            return [];
+        }
+    });
 }
 
 module.exports = { registerIpcHandlers };

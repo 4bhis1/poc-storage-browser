@@ -86,6 +86,38 @@ const initDB = async () => {
             );
         `);
 
+        // Local Sync Activity log — activities written here first, then flushed to Global DB
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS "LocalSyncActivity" (
+                "id" TEXT PRIMARY KEY,
+                "action" TEXT NOT NULL,
+                "fileName" TEXT NOT NULL,
+                "status" TEXT NOT NULL,
+                "error" TEXT,
+                "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                "synced" BOOLEAN DEFAULT false
+            );
+        `);
+
+        // Cleanup: remove SKIP entries (they are noise) and old duplicate failures
+        await client.query(`DELETE FROM "LocalSyncActivity" WHERE action = 'SKIP';`);
+
+        // Keep only the latest row per (action, fileName, status) — remove older duplicates
+        await client.query(`
+            DELETE FROM "LocalSyncActivity"
+            WHERE id NOT IN (
+                SELECT DISTINCT ON (action, "fileName", status) id
+                FROM "LocalSyncActivity"
+                ORDER BY action, "fileName", status, "createdAt" DESC
+            );
+        `);
+
+        // Remove entries older than 7 days
+        await client.query(`
+            DELETE FROM "LocalSyncActivity"
+            WHERE "createdAt" < NOW() - INTERVAL '7 days';
+        `);
+
         await client.query('COMMIT');
         console.log('[Database] Initialized Successfully');
     } catch (e) {

@@ -104,3 +104,25 @@ enum Role {
   TENANT_ADMIN
   TEAMMATE
 }
+
+model SyncHistory {
+  id           String         @id @default(cuid())
+  status       String         // "SUCCESS", "FAILED", "IN_PROGRESS"
+  startedAt    DateTime       @default(now())
+  completedAt  DateTime?
+  totalFiles   Int            @default(0)
+  syncedFiles  Int            @default(0)
+  failedFiles  Int            @default(0)
+  activities   SyncActivity[]
+}
+
+model SyncActivity {
+  id           String      @id @default(cuid())
+  historyId    String
+  action       String      // "UPLOAD", "DOWNLOAD", "SKIP", "DELETE"
+  fileName     String
+  status       String      // "SUCCESS", "FAILED"
+  error        String?
+  createdAt    DateTime    @default(now())
+  history      SyncHistory @relation(fields: [historyId], references: [id], onDelete: Cascade)
+}

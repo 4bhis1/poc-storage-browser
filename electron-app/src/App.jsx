@@ -12,6 +12,7 @@ import Sidebar from "./components/Sidebar";
 import TransferStatus from "./components/TransferStatus";
 import BucketsPage from "./pages/BucketsPage";
 import FilesPage from "./pages/FilesPage";
+import SyncPage from "./pages/SyncPage";
 import LoginPage from "./pages/LoginPage";
 import { SystemProvider } from "./contexts/SystemContext";
 
@@ -36,6 +37,7 @@ const Layout = () => {
           <Routes>
             <Route path="/" element={<BucketsPage />} />
             <Route path="/files/:bucketId" element={<FilesPage />} />
+            <Route path="/sync" element={<SyncPage />} />
           </Routes>
         </div>
       </div>

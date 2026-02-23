@@ -5,6 +5,7 @@ const fsPromises = require('fs/promises');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const syncHistory = require('./syncHistory');
 
 const ROOT_PATH = process.env.ROOT_PATH || "/home/abhishek/FMS";
 const API_URL = process.env.API_URL || "http://localhost:3000/api";
@@ -34,6 +35,9 @@ class SyncManager {
         this.onAuthExpired = onAuthExpired;
         if (downloadingPaths) this.downloadingPaths = downloadingPaths;
 
+        // Initialize the shared sync history logger with this token
+        syncHistory.init(token);
+
         if (this.syncIntervalId) clearInterval(this.syncIntervalId);
 
         this.runSync(); // Immediate first sync
@@ -46,10 +50,15 @@ class SyncManager {
             clearInterval(this.syncIntervalId);
             this.syncIntervalId = null;
         }
+        syncHistory.stop();
         this.authToken = null;
         this.isSyncing = false;
         console.log('[SyncManager] Stopped');
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // RUN SYNC CYCLE
+    // ─────────────────────────────────────────────────────────────────────────
 
     async runSync() {
         if (this.isSyncing || !this.authToken) return;
@@ -64,12 +73,14 @@ class SyncManager {
                 if (this.onAuthExpired) this.onAuthExpired();
             }
         } finally {
+            // Flush all buffered activities (downloads + skips from this cycle)
+            await syncHistory.flush();
             this.isSyncing = false;
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // MAIN SYNC ENTRY POINT
+    // MAIN SYNC ENTRY POINT — fetches from Global DB and downloads missing files
     // ─────────────────────────────────────────────────────────────────────────
 
     async syncAll() {
@@ -79,7 +90,7 @@ class SyncManager {
 
         const { tenants, accounts } = response.data;
 
-        // 1. Sync Tenants
+        // 1. Sync Tenants into local DB
         for (const tenant of (tenants || [])) {
             await database.query(`
                 INSERT INTO "Tenant" (id, name, "updatedAt")
@@ -110,7 +121,7 @@ class SyncManager {
 
             console.log(`[SyncManager] Account synced: ${account.name} (creds: ${account.awsAccessKeyId ? 'OK' : 'MISSING'})`);
 
-            // 3. Sync Buckets + Files for this account
+            // 3. For each bucket — check changes and download missing files
             for (const bucket of (account.buckets || [])) {
                 await this.syncBucket(bucket);
             }
@@ -125,7 +136,7 @@ class SyncManager {
     // ─────────────────────────────────────────────────────────────────────────
 
     async syncBucket(bucket) {
-        // 3a. Upsert bucket record
+        // Upsert bucket record into local DB
         await database.query(`
             INSERT INTO "Bucket" (id, name, region, "accountId", "updatedAt")
             VALUES ($1, $2, $3, $4, $5)
@@ -141,7 +152,7 @@ class SyncManager {
             fs.mkdirSync(bucketLocalPath, { recursive: true });
         }
 
-        // 3b. Sync all file objects from this bucket
+        // Check each file from the Global DB against local filesystem
         const files = bucket.files || [];
         let downloadCount = 0;
         let skippedCount = 0;
@@ -149,47 +160,73 @@ class SyncManager {
         for (const file of files) {
             if (!file.key) continue;
 
+            // Upsert FileObject into local DB so search works
+            await database.query(`
+                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt")
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    key = EXCLUDED.key,
+                    "isFolder" = EXCLUDED."isFolder",
+                    size = EXCLUDED.size,
+                    "mimeType" = EXCLUDED."mimeType",
+                    "updatedAt" = EXCLUDED."updatedAt",
+                    "isSynced" = true,
+                    "lastSyncedAt" = NOW()
+            `, [
+                file.id || `${bucket.id}-${file.key}`,
+                file.name || file.key.split('/').pop() || file.key,
+                file.key,
+                file.isFolder || false,
+                file.size || null,
+                file.mimeType || null,
+                bucket.id,
+                file.updatedAt || new Date()
+            ]);
+
             if (file.isFolder) {
-                // Just ensure the local directory exists
+                // Ensure the local directory exists
                 const dirPath = path.join(ROOT_PATH, bucket.name, file.key.replace(/\/$/, ''));
                 if (!fs.existsSync(dirPath)) {
                     fs.mkdirSync(dirPath, { recursive: true });
                 }
+                // Folders are not tracked as activities — they are auto-created
                 continue;
             }
 
             // Build the expected local path for this file
             const localFilePath = path.join(ROOT_PATH, bucket.name, file.key);
 
-            // Check if the file already exists locally
+            // Check if the file already exists locally with matching size
             const existsLocally = fs.existsSync(localFilePath);
-
             if (existsLocally) {
-                // Optionally check size to detect corruption/truncation
                 const localStat = fs.statSync(localFilePath);
                 if (file.size && localStat.size === file.size) {
                     skippedCount++;
-                    continue; // Already synced, skip
+                    // Don't log SKIPs — they are noise (file already synced, no action taken)
+                    continue; // Already synced — no action needed
                 }
                 console.log(`[SyncManager] File size mismatch, re-downloading: ${file.key}`);
             }
 
-            // File is missing locally — download from S3 via presigned URL
+            // File is missing or corrupted locally — download from S3 via presigned URL
             try {
                 await this.downloadFile(bucket, file, localFilePath);
                 downloadCount++;
+                await syncHistory.logActivity('DOWNLOAD', file.key, 'SUCCESS');
             } catch (err) {
                 console.error(`[SyncManager] Failed to download ${file.key}:`, err.message);
+                await syncHistory.logActivity('DOWNLOAD', file.key, 'FAILED', err.message);
             }
         }
 
-        if (downloadCount > 0 || files.length > 0) {
+        if (files.length > 0) {
             console.log(`[SyncManager] Bucket "${bucket.name}": ${files.length} remote files, ${downloadCount} downloaded, ${skippedCount} already local`);
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // DOWNLOAD A SINGLE FILE (with watcher guard)
+    // DOWNLOAD A SINGLE FILE (with watcher guard to prevent re-upload loop)
     // ─────────────────────────────────────────────────────────────────────────
 
     async downloadFile(bucket, file, localFilePath) {
@@ -202,7 +239,6 @@ class SyncManager {
         // Register in watcher guard BEFORE writing so the watcher skips re-uploading
         this.downloadingPaths.add(localFilePath);
 
-        // Lazy-require to avoid circular dep at module load time
         const statusManager = require('./transfers/status');
         const transferId = `dl-${Date.now()}-${file.name}`;
         statusManager.startTransfer(transferId, file.name, 'download', file.size || 0);
@@ -210,11 +246,11 @@ class SyncManager {
         try {
             console.log(`[SyncManager] Downloading: ${file.key} → ${path.basename(localFilePath)}`);
 
-            // Get presigned download URL from web app
+            // Get presigned download URL from Global DB web app
             const presignRes = await axios.get(`${API_URL}/files/presigned`, {
                 params: {
                     bucketId: bucket.id,
-                    name: file.key,       // full S3 key used directly as key
+                    name: file.key,
                     action: 'download',
                     contentType: file.mimeType || 'application/octet-stream',
                 },
@@ -235,12 +271,11 @@ class SyncManager {
             console.log(`[SyncManager] Downloaded: ${file.key}`);
 
         } catch (err) {
-            // Report error in the status panel
             const statusManager2 = require('./transfers/status');
             statusManager2.completeTransfer(transferId, 'error');
             throw err;
         } finally {
-            // Remove from watcher guard after a delay matching chokidar's stabilityThreshold
+            // Remove from watcher guard after stability threshold
             setTimeout(() => {
                 this.downloadingPaths.delete(localFilePath);
             }, 3000);
@@ -280,7 +315,6 @@ class SyncManager {
             });
         });
     }
-
 }
 
 module.exports = new SyncManager();
