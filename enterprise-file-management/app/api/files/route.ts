@@ -5,18 +5,53 @@ import { decrypt } from "@/lib/encryption";
 import { verifyToken } from "@/lib/token";
 
 export async function GET(request: NextRequest) {
-  // ... (keep existing GET implementation)
-  try {
-    const searchParams = request.nextUrl.searchParams;
-    const bucketId = searchParams.get("bucketId");
-    const parentId = searchParams.get("parentId");
+    // ... (keep existing GET implementation)
+    try {
+        const searchParams = request.nextUrl.searchParams;
+        const bucketId = searchParams.get('bucketId');
+        const parentId = searchParams.get('parentId');
+        const syncAll = searchParams.get('syncAll') === 'true';
 
-    const where: any = {};
-    if (bucketId) where.bucketId = bucketId;
-    if (parentId) {
-      where.parentId = parentId;
-    } else if (bucketId) {
-      where.parentId = null;
+        const where: any = {};
+        if (bucketId) where.bucketId = bucketId;
+        if (parentId) {
+            where.parentId = parentId;
+        } else if (bucketId && !syncAll) {
+            where.parentId = null;
+        }
+
+        const files = await prisma.fileObject.findMany({
+            where,
+            orderBy: { isFolder: 'desc' },
+            include: {
+                children: true
+            }
+        });
+
+        const fileItems = files.map(f => ({
+            id: f.id,
+            name: f.name,
+            type: f.isFolder ? 'folder' : (f.mimeType?.includes('image') ? 'image' : f.mimeType?.includes('pdf') ? 'pdf' : 'document'),
+            size: f.size || 0,
+            modifiedAt: f.updatedAt.toISOString(),
+            owner: 'Admin',
+            shared: false,
+            starred: false,
+            children: f.children.map(c => ({ id: c.id })),
+            // Fields needed for SyncEngine in Electron
+            key: f.key,
+            isFolder: f.isFolder,
+            mimeType: f.mimeType,
+            bucketId: f.bucketId,
+            parentId: f.parentId,
+            createdAt: f.createdAt,
+            updatedAt: f.updatedAt
+        }));
+
+        return NextResponse.json(fileItems);
+    } catch (error) {
+        console.error('Failed to fetch files:', error);
+        return NextResponse.json({ error: 'Failed to fetch files' }, { status: 500 });
     }
 
     const files = await prisma.fileObject.findMany({

@@ -1,260 +1,155 @@
-
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+require('dotenv').config();
+const { app, BrowserWindow } = require('electron');
 const path = require('path');
-const fs = require('fs');
-const fsPromises = require('fs/promises');
-const https = require('https');
 const chokidar = require('chokidar');
 const si = require('systeminformation');
+const backend = require('./backend');
+const { registerIpcHandlers } = require('./main/ipcHandlers');
+
+const ROOT_PATH = process.env.ROOT_PATH || path.join(app.getPath('home'), 'FMS');
 
 let mainWindow;
 let watcher;
+let statsIntervals = [];
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1200,
-    height: 800,
+    title: 'Cloud Vault',
+    width: 1200, height: 800,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false,
+      sandbox: true,
     },
     backgroundColor: '#0f172a',
     show: false,
   });
 
-  // Load the Vite dev server URL
   mainWindow.loadURL('http://localhost:5173');
-  
-  // Open DevTools for debugging
-  // mainWindow.webContents.openDevTools();
-
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    mainWindow.maximize(); // Make full screen
+    mainWindow.maximize(); 
   });
 
-  // Send network stats periodically
-  setInterval(async () => {
-      try {
-          const stats = await si.networkStats();
-          if (stats && stats.length > 0) {
-              const mainInterface = stats.find(i => i.operstate === 'up') || stats[0];
-              if (mainWindow) {
-                mainWindow.webContents.send('network-stats', {
-                    rx_sec: mainInterface.rx_sec, // Bytes per second received
-                    tx_sec: mainInterface.tx_sec  // Bytes per second transmitted
-                });
-              }
-          }
-      } catch (e) {
-          // console.error('Network stats error', e);
-      }
-  }, 1000);
-  
-  // Send disk stats periodically (every 10 seconds)
-  setInterval(async () => {
-    try {
-        const disks = await si.fsSize();
-        if (disks && disks.length > 0) {
-            // Try to find the root volume or just take the first one
-            const mainDisk = disks.find(d => d.mount === '/' || d.mount === 'C:') || disks[0];
-            if (mainWindow) {
-                mainWindow.webContents.send('disk-stats', {
-                    total: mainDisk.size,
-                    used: mainDisk.used,
-                    available: mainDisk.available,
-                    mount: mainDisk.mount,
-                    use_percent: mainDisk.use
-                });
-            }
-        }
-    } catch (e) {
-        console.error('Disk stats error', e);
-    }
-  }, 10000);
+  // Initialize status manager with main window
+  backend.status.init(mainWindow);
+
+  startMonitoring();
+  mainWindow.on('closed', () => {
+    stopMonitoring();
+    mainWindow = null;
+  });
 }
 
-app.whenReady().then(() => {
-  createWindow();
-  app.on('activate', function () {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+function startMonitoring() {
+  // Network Stats
+  statsIntervals.push(setInterval(async () => {
+    try {
+      const stats = await si.networkStats();
+      const up = stats.find(i => i.operstate === 'up') || stats[0];
+      if (mainWindow && up) {
+        mainWindow.webContents.send('network-stats', { rx_sec: up.rx_sec, tx_sec: up.tx_sec });
+      }
+    } catch (e) {}
+  }, 1000));
+
+  // Disk Stats
+  statsIntervals.push(setInterval(async () => {
+    try {
+      const disks = await si.fsSize();
+      const main = disks.find(d => d.mount === '/' || d.mount === 'C:') || disks[0];
+      if (mainWindow && main) {
+        mainWindow.webContents.send('disk-stats', { total: main.size, used: main.used, available: main.available, use_percent: main.use });
+      }
+    } catch (e) {}
+  }, 10000));
+}
+
+function stopMonitoring() {
+  statsIntervals.forEach(clearInterval);
+  statsIntervals = [];
+}
+
+app.whenReady().then(async () => {
+  // 1. Init Database
+  await backend.db.initDB();
+  
+  // 2. Ensure Root Folder
+  const fs = require('fs');
+  if (!fs.existsSync(ROOT_PATH)) fs.mkdirSync(ROOT_PATH, { recursive: true });
+
+  // 3. Setup File Watcher
+  watcher = chokidar.watch(ROOT_PATH, { 
+    ignored: /(^|[\/\\])\../, 
+    persistent: true, 
+    ignoreInitial: true,
+    awaitWriteFinish: {
+      // Wait until file size is stable for 2s before firing 'add'
+      stabilityThreshold: 2000,
+      pollInterval: 500
+    }
   });
-});
 
-app.on('window-all-closed', function () {
-  if (watcher) watcher.close();
-  if (process.platform !== 'darwin') app.quit();
-});
+  // Shared guard sets
+  const uploadInProgress = new Set(); // prevent concurrent re-upload of same file
+  const downloadingPaths = new Set(); // files being downloaded by SyncManager — watcher must skip these
 
-// Handle folder selection
-ipcMain.handle('select-folder', async () => {
-  const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openDirectory'],
-  });
-  if (canceled) {
-    return null;
-  }
-  return filePaths[0];
-});
-
-// Start watching folder
-ipcMain.handle('start-sync', async (event, folderPath) => {
-  if (watcher) {
-    await watcher.close();
-  }
-
-  console.log(`Starting sync for: ${folderPath}`);
-
-  // Initialize watcher.
-  watcher = chokidar.watch(folderPath, {
-    ignored: /(^|[\/\\])\../, // ignore dotfiles
-    persistent: true,
-    ignoreInitial: false,
-    depth: 99,
-  });
-
-  // Add event listeners.
   watcher
-    .on('add', (path) => {
-      if (mainWindow) mainWindow.webContents.send('file-added', path);
+    .on('add', async (filePath) => {
+      if (mainWindow) mainWindow.webContents.send('file-add', filePath);
+
+      // Skip files that the SyncManager is actively downloading — they were NOT user-added
+      if (downloadingPaths.has(filePath)) {
+        console.log(`[Watcher] Skipping sync-download file (not re-uploading): ${path.basename(filePath)}`);
+        return;
+      }
+
+      // Skip if already uploading (duplicate watcher event)
+      if (uploadInProgress.has(filePath)) {
+        console.log(`[Watcher] Skipping duplicate upload for: ${path.basename(filePath)}`);
+        return;
+      }
+
+      uploadInProgress.add(filePath);
+      try {
+        await backend.onLocalFileAdded(filePath, ROOT_PATH);
+      } catch(e) {
+        console.error('[Watcher] Upload error:', e.message);
+      } finally {
+        uploadInProgress.delete(filePath);
+      }
     })
-    .on('change', (path) => {
-      if (mainWindow) mainWindow.webContents.send('file-changed', path);
+    .on('change', (filePath) => {
+      // Just notify UI — awaitWriteFinish means 'add' already handled the stable version
+      if (mainWindow) mainWindow.webContents.send('file-change', filePath);
     })
-    .on('unlink', (path) => {
-      if (mainWindow) mainWindow.webContents.send('file-removed', path);
+    .on('unlink', async (filePath) => {
+      if (mainWindow) mainWindow.webContents.send('file-unlink', filePath);
+      try { await backend.onLocalFileRemoved(filePath, ROOT_PATH); } catch(e) {}
     })
-    .on('addDir', (path) => {
-        if (mainWindow) mainWindow.webContents.send('dir-added', path);
+    .on('addDir', (filePath) => {
+      if (mainWindow) mainWindow.webContents.send('file-addDir', filePath);
     })
-    .on('unlinkDir', (path) => {
-        if (mainWindow) mainWindow.webContents.send('dir-removed', path);
+    .on('unlinkDir', async (filePath) => {
+      if (mainWindow) mainWindow.webContents.send('file-unlinkDir', filePath);
+      try { await backend.onLocalDirRemoved(filePath, ROOT_PATH); } catch(e) {}
     })
     .on('error', (error) => {
-        console.error(`Watcher error: ${error}`);
-        if(mainWindow) mainWindow.webContents.send('sync-error', error.message);
+      console.error(`Watcher error: ${error}`);
+      if(mainWindow) mainWindow.webContents.send('sync-error', error.message);
     });
-    
-  return true;
+
+  // 4. Create Window
+  createWindow();
+
+  // 5. Register IPC (pass downloadingPaths so SyncManager can be initialized with it)
+  registerIpcHandlers(mainWindow, ROOT_PATH, downloadingPaths);
 });
 
-// List content in a specific path
-ipcMain.handle('list-path-content', async (event, folderPath) => {
-  try {
-    const entries = await fsPromises.readdir(folderPath, { withFileTypes: true });
-    return entries.map(dirent => ({
-      name: dirent.name,
-      isDirectory: dirent.isDirectory()
-    }));
-  } catch (error) {
-    console.error('Error listing path content:', error);
-    return [];
-  }
-});
-
-
-// Create folder
-ipcMain.handle('create-folder', async (event, folderPath) => {
-    try {
-        await fsPromises.mkdir(folderPath, { recursive: true });
-        return true;
-    } catch (error) {
-        console.error('Error creating folder:', error);
-        return false;
-    }
-
-});
-
-const backendManager = require('./backend/index.js');
-
-// Download File Handler
-ipcMain.handle('download-file', async (event, { url, targetPath }) => {
-    // ... existing download code ...
-    return new Promise((resolve, reject) => {
-        const fileName = path.basename(url);
-        const destination = path.join(targetPath, fileName);
-        const file = fs.createWriteStream(destination);
-
-        https.get(url, (response) => {
-            // ... existing code ...
-            if (response.statusCode !== 200) {
-                file.close();
-                fs.unlink(destination, () => {}); 
-                reject(`Server responded with ${response.statusCode}: ${response.statusMessage}`);
-                return;
-            }
-
-            const totalBytes = parseInt(response.headers['content-length'], 10);
-            let receivedBytes = 0;
-
-            response.on('data', (chunk) => {
-                receivedBytes += chunk.length;
-                if (totalBytes) {
-                     const progress = (receivedBytes / totalBytes) * 100;
-                     if (mainWindow) {
-                         mainWindow.webContents.send('download-progress', {
-                             filename: fileName,
-                             progress: progress,
-                             received: receivedBytes,
-                             total: totalBytes
-                         });
-                     }
-                }
-            });
-
-            response.pipe(file);
-
-            file.on('finish', () => {
-                file.close(() => resolve({ success: true, path: destination }));
-            });
-
-            file.on('error', (err) => {
-                fs.unlink(destination, () => {}); 
-                reject(err.message);
-            });
-        }).on('error', (err) => {
-            fs.unlink(destination, () => {}); 
-            reject(err.message);
-        });
-    });
-});
-
-// Handle File Drop (Copy & Sync)
-ipcMain.handle('handle-file-drop', async (event, { files, currentPath }) => {
-    console.log('Files dropped:', files, 'Current Directory:', currentPath);
-    return await backendManager.handleFileDrop(files, currentPath);
-});
-
-// Handle S3 Sync
-ipcMain.handle('sync-s3-to-local', async (event, folderPath) => {
-    return await backendManager.syncFromS3(folderPath, (data) => {
-        if (event.sender) {
-            event.sender.send('sync-progress', data);
-        }
-    });
-});
-
-// Select File for Upload
-ipcMain.handle('select-file', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openFile', 'multiSelections']
-    });
-    if (canceled) return null;
-    return filePaths;
-});
-
-// Select Folder for Upload
-ipcMain.handle('select-folder-upload', async () => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
-        properties: ['openDirectory', 'multiSelections'] 
-    });
-    if (canceled) return null;
-    return filePaths;
-});
-
-// Upload Items (with Zip option)
-ipcMain.handle('upload-items', async (event, { items, currentPath, shouldZip }) => {
-    return await backendManager.uploadItems(items, currentPath, shouldZip);
+app.on('window-all-closed', async () => {
+  if (watcher) watcher.close();
+  stopMonitoring();
+  await backend.db.closeDB();
+  if (process.platform !== 'darwin') app.quit();
 });

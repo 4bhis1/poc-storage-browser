@@ -1,574 +1,877 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Folder, 
-  FileText, 
-  Image as ImageIcon,
-  Music,
-  Video,
-  List, 
-  Grid3X3, 
-  Loader2,
-  Cloud,
-  CheckCircle2,
-  X,
-  Download,
-  Trash2,
-  MoreVertical,
-  RefreshCw
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Button } from '../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
+import { Checkbox } from '../components/ui/checkbox';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import {
+  Dialog, DialogContent, DialogDescription,
+  DialogFooter, DialogHeader, DialogTitle,
+} from '../components/ui/dialog';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '../components/ui/dropdown-menu';
+import {
+  Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue,
+} from '../components/ui/select';
+import {
+  Table, TableBody, TableCell, TableHead,
+  TableHeader, TableRow,
+} from '../components/ui/table';
+
+import {
+  Archive, ArrowUpDown, ChevronRight, CloudUpload,
+  Copy, Download, File, FileCode, FileText,
+  FolderOpen, FolderPlus, HardDrive, Image,
+  List, LayoutGrid, MoreHorizontal, Move,
+  Music, Pencil, RefreshCw, Star,
+  Trash2, Upload, Users, Video, X, Package,
+  Folder,
 } from 'lucide-react';
-import clsx from 'clsx';
 
-const FileIcon = ({ name, isDirectory, size = 24, className }) => {
-    if (isDirectory) return <Folder size={size} className={clsx("text-blue-500 fill-blue-500/20", className)} />;
-    
-    const ext = name.split('.').pop().toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) return <ImageIcon size={size} className={clsx("text-emerald-500", className)} />;
-    if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) return <Video size={size} className={clsx("text-purple-500", className)} />;
-    if (['mp3', 'wav', 'ogg'].includes(ext)) return <Music size={size} className={clsx("text-pink-500", className)} />;
-    if (['pdf'].includes(ext)) return <FileText size={size} className={clsx("text-red-500", className)} />;
-    if (['xls', 'xlsx', 'csv'].includes(ext)) return <FileText size={size} className={clsx("text-green-500", className)} />;
-    if (['zip', 'rar', 'tar', '7z'].includes(ext)) return <Folder size={size} className={clsx("text-amber-500", className)} />;
-    
-    return <FileText size={size} className={clsx("text-slate-400", className)} />;
-};
+const ROOT_PATH = "/home/abhishek/FMS";
 
+// ─── Helpers ────────────────────────────────────────────────────────────────
 const formatBytes = (bytes) => {
-    if (bytes === 0) return '0 B';
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = parseInt(Math.floor(Math.log(bytes) / Math.log(1024)));
-    return Math.round(bytes / Math.pow(1024, i), 2) + ' ' + sizes[i];
+  if (!bytes || bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 };
 
-const FilesPage = ({ currentPath, onNavigate, rootPath }) => {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [viewMode, setViewMode] = useState('grid');
-  const [selectedItems, setSelectedItems] = useState(new Set());
-  const [downloadInfo, setDownloadInfo] = useState(null);
-  const [syncStatus, setSyncStatus] = useState(null);
+const formatDate = (dateString) => {
+  if (!dateString) return '--';
+  const d = new Date(dateString);
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+};
 
-  const fetchContent = (path) => {
-      setLoading(true);
-      if (window.electronAPI) {
-        window.electronAPI.listContent(path)
-          .then(result => {
-             const sorted = result.sort((a, b) => {
-                 if (a.isDirectory === b.isDirectory) return a.name.localeCompare(b.name);
-                 return a.isDirectory ? -1 : 1;
-             });
-             setItems(sorted);
-             setLoading(false);
-          })
-          .catch(err => {
-            console.error("Failed to load content", err);
-            setLoading(false);
-          });
-      } else {
-       
-      }
+const getFileType = (file) => {
+  if (file.isFolder) return 'folder';
+  const mime = file.mimeType || '';
+  const name = file.name?.toLowerCase() || '';
+  if (mime.startsWith('image/')) return 'image';
+  if (mime.startsWith('video/')) return 'video';
+  if (mime.startsWith('audio/')) return 'audio';
+  if (mime.includes('pdf')) return 'pdf';
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('archive') || name.endsWith('.zip') || name.endsWith('.rar') || name.endsWith('.tar') || name.endsWith('.gz')) return 'archive';
+  if (name.match(/\.(js|ts|jsx|tsx|py|go|rs|java|cpp|c|html|css|json|sh)$/)) return 'code';
+  return 'other';
+};
+
+const fileIconMap = {
+  folder: { Icon: FolderOpen, color: 'text-primary' },
+  pdf: { Icon: FileText, color: 'text-red-500' },
+  image: { Icon: Image, color: 'text-emerald-500' },
+  document: { Icon: FileText, color: 'text-blue-500' },
+  spreadsheet: { Icon: FileText, color: 'text-green-500' },
+  archive: { Icon: Archive, color: 'text-amber-500' },
+  video: { Icon: Video, color: 'text-purple-500' },
+  audio: { Icon: Music, color: 'text-pink-500' },
+  code: { Icon: FileCode, color: 'text-orange-500' },
+  other: { Icon: File, color: 'text-muted-foreground' },
+};
+
+const FileIcon = ({ file, className = "h-4 w-4" }) => {
+  const type = getFileType(file);
+  const { Icon, color } = fileIconMap[type] || fileIconMap.other;
+  return <Icon className={`${className} shrink-0 ${color}`} />;
+};
+
+// ─── Upload Dialog ───────────────────────────────────────────────────────────
+function FileUploadDialog({ open, onOpenChange, bucketInfo, folderStack }) {
+  const [selectedFiles, setSelectedFiles] = useState([]);  // File objects from file input
+  const [selectedFolders, setSelectedFolders] = useState([]); // { name, path } from native dialog
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [shouldZip, setShouldZip] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const hasFolders = selectedFolders.length > 0;
+  const totalItems = selectedFiles.length + selectedFolders.length;
+
+  const handleAddFiles = (fileList) => {
+    if (!fileList) return;
+    const newFiles = Array.from(fileList);
+    setSelectedFiles(prev => {
+      const existingKeys = new Set(prev.map(f => `${f.name}:${f.size}`));
+      return [...prev, ...newFiles.filter(f => !existingKeys.has(`${f.name}:${f.size}`))];
+    });
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  useEffect(() => {
-    fetchContent(currentPath);
-    setSelectedItems(new Set());
-  }, [currentPath]);
+  // Use Electron's native folder picker — returns actual folder PATHS (not webkitdirectory file objects)
+  const handleSelectFolder = async () => {
+    const paths = await window.electronAPI.selectFolderForUpload();
+    if (!paths || paths.length === 0) return;
+    setSelectedFolders(prev => {
+      const existingPaths = new Set(prev.map(f => f.path));
+      const newFolders = paths
+        .filter(p => !existingPaths.has(p))
+        .map(p => ({ name: p.split('/').pop() || p, path: p }));
+      return [...prev, ...newFolders];
+    });
+  };
 
-  useEffect(() => {
-    if (window.electronAPI && window.electronAPI.onSyncProgress) {
-        const cleanup = window.electronAPI.onSyncProgress((data) => {
-            if (data.type === 'complete' || data.type === 'error') {
-                // Stop spinner, show summary
-                setSyncStatus({ ...data, active: false });
-                // Refresh file list and auto-dismiss after 4s
-                fetchContent(currentPath);
-                setTimeout(() => setSyncStatus(null), 4000);
-            } else {
-                setSyncStatus({ ...data, active: true });
-            }
-        });
-        return cleanup;
+  const removeFile = (index) => setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+  const removeFolder = (index) => setSelectedFolders(prev => prev.filter((_, i) => i !== index));
+
+  const handleUpload = async () => {
+    if (totalItems === 0 || !bucketInfo) return;
+    setUploading(true);
+
+    const currentPhysicalPath = [ROOT_PATH, bucketInfo.name, ...folderStack.map(f => f.name)].join('/');
+
+    // Build the item list:
+    // - Regular files: resolve path via webUtils
+    // - Folders: already actual paths from native dialog
+    const filePaths = selectedFiles
+      .map(f => window.electronAPI.getFilePath(f))
+      .filter(Boolean);
+
+    const folderPaths = selectedFolders.map(f => f.path);
+
+    const allPaths = [...new Set([...filePaths, ...folderPaths])];
+
+    if (allPaths.length === 0) {
+      alert('Could not read file paths. Please re-select files.');
+      setUploading(false);
+      return;
     }
-  }, []);
 
-  useEffect(() => {
-      if (window.electronAPI) {
-          const cleanup = window.electronAPI.onDownloadProgress((data) => {
-               setDownloadInfo({
-                   filename: data.filename,
-                   progress: Math.round(data.progress),
-                   status: data.progress >= 100 ? 'completed' : 'downloading',
-                   total: data.total
-               });
-               
-               if (data.progress >= 100) {
-                   setTimeout(() => {
-                       setDownloadInfo(null);
-                       fetchContent(currentPath); // Refresh list
-                   }, 2000);
-               }
-          });
-          return cleanup;
-      }
-  }, [currentPath]);
-
-  const handleItemClick = (item) => {
-      if (item.isDirectory) {
-          const separator = currentPath.endsWith('/') ? '' : '/';
-          onNavigate(`${currentPath}${separator}${item.name}`);
-      } else {
-          toggleSelect(item.name);
-      }
-  };
-
-  const toggleSelect = (name) => {
-      const newSelected = new Set(selectedItems);
-      if (newSelected.has(name)) {
-          newSelected.delete(name);
-      } else {
-          newSelected.add(name);
-      }
-      setSelectedItems(newSelected);
-  };
-
-  const handleUpload = async (isDirectory) => {
-    if (!window.electronAPI) return;
-
-    let items = [];
     try {
-        if (isDirectory) {
-            items = await window.electronAPI.selectFolderForUpload();
-        } else {
-            items = await window.electronAPI.selectFileForUpload();
-        }
+      // shouldZip applies only when folders are selected
+      await window.electronAPI.uploadItems(allPaths, currentPhysicalPath, hasFolders && shouldZip);
     } catch (err) {
-        console.error("Selection cancelled or failed", err);
-        return;
+      console.error('[UploadDialog] Upload error:', err);
+      alert('Upload failed: ' + err.message);
+    } finally {
+      setUploading(false);
+      handleClose(false);
     }
+  };
 
-    if (!items || items.length === 0) return;
+  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
+  const handleDragLeave = () => setIsDragging(false);
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    handleAddFiles(e.dataTransfer.files);
+  };
 
-    let zip = false;
-    if (isDirectory) {
-        // Simple confirm dialog
-        zip = window.confirm("Do you want to zip this folder before uploading?");
+  const handleClose = (val) => {
+    if (!val) {
+      setSelectedFiles([]);
+      setSelectedFolders([]);
+      setShouldZip(false);
     }
+    onOpenChange(val);
+  };
 
+  const currentPathDisplay = folderStack.length > 0
+    ? `/${folderStack.map(f => f.name).join('/')}/`
+    : '/ (Root)';
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="sm:max-w-lg w-full overflow-hidden">
+        <DialogHeader>
+          <DialogTitle>Upload Files</DialogTitle>
+          <DialogDescription>
+            Drag and drop files or browse to upload to your bucket.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Destination Path */}
+          <div className="space-y-1.5 min-w-0">
+            <Label>Destination Path</Label>
+            <div className="flex items-center px-3 py-2 text-sm border rounded-md bg-muted/50 text-muted-foreground">
+              <span className="truncate">{currentPathDisplay}</span>
+            </div>
+          </div>
+
+          {/* Drop zone */}
+          <div
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${
+              isDragging ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50"
+            }`}
+          >
+            <CloudUpload className={`h-10 w-10 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
+            <div className="text-center">
+              <p className="text-sm font-medium">
+                {isDragging ? "Drop files here" : "Click to browse or drag files here"}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">Supports any file type up to 5 GB</p>
+            </div>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className="hidden"
+              onChange={e => handleAddFiles(e.target.files)}
+            />
+          </div>
+
+          {/* Folder picker — uses native Electron dialog for real folder PATH */}
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5 text-xs"
+              onClick={handleSelectFolder}
+            >
+              <FolderOpen className="h-3.5 w-3.5" />
+              Select Folder
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              Select an entire folder to upload
+            </span>
+          </div>
+
+          {/* Zip toggle — shown when folders are selected */}
+          {hasFolders && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+              <Package className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+              <div className="flex-1 space-y-1">
+                <p className="text-sm font-medium text-amber-900">Folder detected</p>
+                <p className="text-xs text-amber-700">
+                  Would you like to compress the folder into a ZIP before uploading?
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <Checkbox
+                    id="zip-toggle"
+                    checked={shouldZip}
+                    onCheckedChange={setShouldZip}
+                  />
+                  <label htmlFor="zip-toggle" className="text-sm text-amber-900 cursor-pointer select-none">
+                    Zip folder before uploading
+                  </label>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Selected items list */}
+          {totalItems > 0 && (
+            <div className="max-h-[200px] w-full overflow-y-auto pr-1 border rounded-md">
+              <div className="space-y-1 p-1">
+                {/* Folder items */}
+                {selectedFolders.map((folder, i) => (
+                  <div key={`folder-${i}`} className="grid grid-cols-[auto_1fr_auto] gap-3 items-center rounded-md border border-amber-200 bg-amber-50/40 p-2.5">
+                    <FolderOpen className="h-4 w-4 text-amber-500 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{folder.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">{folder.path}</p>
+                    </div>
+                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFolder(i)}>
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+                {/* Regular file items */}
+                {selectedFiles.map((file, i) => (
+                  <div key={`file-${i}`} className="grid grid-cols-[auto_1fr_auto] gap-3 items-center rounded-md border p-2.5">
+                    <File className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">{file.name}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs text-muted-foreground whitespace-nowrap">{formatBytes(file.size)}</span>
+                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFile(i)}>
+                        <X className="h-3 w-3" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Actions */}
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              {totalItems > 0
+                ? `${totalItems} item${totalItems > 1 ? 's' : ''} selected${hasFolders && shouldZip ? ' — will be zipped' : ''}`
+                : "No files selected"}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => handleClose(false)} disabled={uploading}>
+                Cancel
+              </Button>
+              <Button onClick={handleUpload} disabled={totalItems === 0 || uploading} className="gap-1.5">
+                {uploading ? (
+                  <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Uploading...</>
+                ) : (
+                  <>
+                    {hasFolders && shouldZip ? <Package className="h-3.5 w-3.5" /> : <Upload className="h-3.5 w-3.5" />}
+                    {hasFolders && shouldZip ? 'Zip & Upload' : 'Upload'}
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── New Folder Dialog (enterprise-identical) ────────────────────────────────
+function NewFolderDialog({ open, onOpenChange, bucketInfo, folderStack, onFolderCreated }) {
+  const [name, setName] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim() || !bucketInfo) return;
+    setIsLoading(true);
     try {
-        // Call backend via preload
-        const results = await window.electronAPI.uploadItems(items, currentPath, zip);
-        console.log('Upload Results:', results);
-        fetchContent(currentPath);
-    } catch (error) {
-        console.error('Upload failed:', error);
+      const currentPhysicalPath = [ROOT_PATH, bucketInfo.name, ...folderStack.map(f => f.name)].join('/');
+      const newPath = `${currentPhysicalPath}/${name.trim()}`;
+      const ok = await window.electronAPI.createFolder(newPath);
+      if (!ok) throw new Error('Failed to create folder');
+      setName('');
+      onOpenChange(false);
+      onFolderCreated?.();
+    } catch (err) {
+      alert('Failed to create folder: ' + err.message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleSync = async () => {
-    if (window.electronAPI) {
-        setLoading(true);
-        try {
-            const result = await window.electronAPI.syncS3(currentPath);
-            console.log('Sync Result:', result);
-            if(result.success) {
-                // Could show a toast here
-            }
-            fetchContent(currentPath);
-        } catch (error) {
-            console.error('Sync failed:', error);
-        } finally {
-            setLoading(false);
-        }
+  const currentPathDisplay = folderStack.length > 0
+    ? `/${folderStack.map(f => f.name).join('/')}`
+    : 'root';
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <DialogTitle>Create New Folder</DialogTitle>
+          <DialogDescription>
+            Create a new folder in{' '}
+            <span className="font-medium text-foreground">
+              {bucketInfo?.name}{currentPathDisplay}
+            </span>.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="folder-name">Folder Name</Label>
+              <Input
+                id="folder-name"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="e.g. Documents"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isLoading || !name.trim()}>
+              {isLoading ? 'Creating...' : 'Create Folder'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Rename Dialog ───────────────────────────────────────────────────────────
+function RenameDialog({ open, onOpenChange, file, onRenamed }) {
+  const [name, setName] = useState('');
+  useEffect(() => { if (file) setName(file.name); }, [file]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim() || name === file?.name) return;
+    // Rename local file via IPC
+    try {
+      const parent = file.path.substring(0, file.path.lastIndexOf('/'));
+      const newPath = `${parent}/${name.trim()}`;
+      await window.electronAPI.renameFile?.(file.path, newPath);
+      onRenamed?.();
+    } catch {
+      alert('Failed to rename — check console.');
     }
-  };
-
-  const toggleSelectAll = () => {
-      if (selectedItems.size === items.length) {
-          setSelectedItems(new Set());
-      } else {
-          setSelectedItems(new Set(items.map(i => i.name)));
-      }
-  };
-
-  const handleDrop = async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      
-      const files = Array.from(e.dataTransfer.files).map(f => f.path);
-      if (files.length > 0 && window.electronAPI) {
-          setLoading(true);
-          try {
-              const results = await window.electronAPI.handleFileDrop(files, currentPath);
-              console.log('Drop results:', results);
-              fetchContent(currentPath); // Refresh
-          } catch (error) {
-              console.error('File drop error:', error);
-          } finally {
-              setLoading(false);
-          }
-      }
-  };
-
-  const handleDragOver = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    onOpenChange(false);
   };
 
   return (
-    <div 
-        className="h-full flex flex-col bg-white text-slate-900 absolute inset-0"
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-    >
-      
-      {/* Minimal Toolbar (View Toggle & Selection Actions only) */}
-      <div className="flex items-center justify-between px-6 py-3 border-b border-slate-100 bg-white z-10 sticky top-0">
-            <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-slate-500">
-                    {items.length} items
-                </span>
-
-                {/* Refresh Button */}
-                <button
-                  onClick={() => fetchContent(currentPath)}
-                  disabled={loading}
-                  className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors ml-2 disabled:opacity-50"
-                  title="Refresh"
-                >
-                    <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-                </button>
-                
-                {/* Sync Button */}
-                <button 
-                  onClick={() => handleSync()}
-                  disabled={loading}
-                  className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-md text-xs font-medium transition-colors ml-2 disabled:opacity-50"
-                  title="Sync with S3"
-                >
-                    <Cloud size={14} />
-                    Sync
-                </button>
-
-                {/* Upload Buttons */}
-                <div className="flex items-center gap-2 ml-2">
-                    <button 
-                        onClick={() => handleUpload(false)}
-                        disabled={loading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-700 hover:bg-slate-100 rounded-md text-xs font-medium transition-colors border border-slate-200"
-                    >
-                        <FileText size={14} />
-                        Upload File
-                    </button>
-                    <button 
-                        onClick={() => handleUpload(true)}
-                        disabled={loading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-50 text-slate-700 hover:bg-slate-100 rounded-md text-xs font-medium transition-colors border border-slate-200"
-                    >
-                        <Folder size={14} />
-                        Upload Folder
-                    </button>
-                </div>
-
-                {selectedItems.size > 0 && (
-                    <>
-                        <div className="w-px h-4 bg-slate-300 mx-1" />
-                        <span className="text-sm font-medium text-blue-600">
-                            {selectedItems.size} selected
-                        </span>
-                        <div className="flex items-center gap-1 ml-2">
-                             <button className="p-1 hover:bg-slate-100 rounded text-slate-500" title="Download">
-                                <Download size={16} />
-                             </button>
-                             <button className="p-1 hover:bg-slate-100 rounded text-red-500" title="Delete">
-                                <Trash2 size={16} />
-                             </button>
-                        </div>
-                    </>
-                )}
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Rename {file?.name}</DialogTitle>
+          <DialogDescription>Enter a new name for this file.</DialogDescription>
+        </DialogHeader>
+        <form onSubmit={handleSubmit}>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="rename">New Name</Label>
+              <Input
+                id="rename"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder={file?.name}
+                autoFocus
+              />
             </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+            <Button type="submit" disabled={!name.trim() || name === file?.name}>Rename</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
-            <div className="flex items-center gap-2">
-                  <div className="flex items-center bg-slate-100 rounded-lg p-0.5 border border-slate-200">
-                    <button
-                        onClick={() => setViewMode('list')}
-                        className={clsx(
-                            "p-1.5 rounded-md transition-all flex items-center justify-center",
-                            viewMode === 'list' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
-                        )}
-                        title="List View"
-                    >
-                        <List size={16} />
-                    </button>
-                    <button
-                        onClick={() => setViewMode('grid')}
-                        className={clsx(
-                            "p-1.5 rounded-md transition-all flex items-center justify-center",
-                            viewMode === 'grid' ? "bg-white text-slate-900 shadow-sm" : "text-slate-400 hover:text-slate-600"
-                        )}
-                        title="Grid View"
-                    >
-                        <Grid3X3 size={16} />
-                    </button>
-                  </div>
-            </div>
-      </div>
+// ─── File Context Menu ───────────────────────────────────────────────────────
+function FileContextMenu({ file, onAction }) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8">
+          <MoreHorizontal className="h-4 w-4" />
+          <span className="sr-only">Actions</span>
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onClick={() => onAction('download', file)}>
+          <Download className="mr-2 h-4 w-4" />
+          Download
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAction('copy', file)}>
+          <Copy className="mr-2 h-4 w-4" />
+          Copy Link
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAction('share', file)}>
+          <Users className="mr-2 h-4 w-4" />
+          Share
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => onAction('rename', file)}>
+          <Pencil className="mr-2 h-4 w-4" />
+          Rename
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAction('move', file)}>
+          <Move className="mr-2 h-4 w-4" />
+          Move
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          className="text-destructive focus:text-destructive focus:bg-destructive/10"
+          onClick={() => onAction('delete', file)}
+        >
+          <Trash2 className="mr-2 h-4 w-4" />
+          Delete
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-6 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-        {loading ? (
-             <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                <Loader2 size={32} className="animate-spin text-blue-500 mb-4" />
-                <p>Loading contents...</p>
-            </div>
-        ) : items.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                <Cloud size={64} className="mb-4 opacity-20" />
-                <p className="text-lg font-medium text-slate-600">Folder is empty</p>
-                <div 
-                    className="mt-4 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg text-sm font-medium cursor-pointer hover:bg-blue-100 transition-colors"
-                    onClick={() => fetchContent(currentPath)}
-                >
-                    Refresh
-                </div>
-            </div>
-        ) : (
-            <>
-                {viewMode === 'grid' ? (
-                    <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 pb-10">
-                        {items.map((item, i) => (
-                            <div 
-                                key={i}
-                                onClick={() => handleItemClick(item)}
-                                className={clsx(
-                                    "group p-4 bg-white border rounded-xl cursor-pointer transition-all hover:bg-slate-50 hover:shadow-md flex flex-col gap-3 relative select-none",
-                                    selectedItems.has(item.name) ? "border-blue-500 ring-1 ring-blue-500/50 bg-blue-50/50" : "border-slate-200 hover:border-slate-300"
-                                )}
-                            >
-                                <div className="flex justify-between items-start pointer-events-none">
-                                    <div className={clsx(
-                                        "p-3 rounded-xl border transition-colors",
-                                        item.isDirectory ? "bg-blue-50 border-blue-100 text-blue-600" : "bg-white border-slate-100 text-slate-500"
-                                    )}>
-                                        <FileIcon name={item.name} isDirectory={item.isDirectory} size={28} />
-                                    </div>
-                                    <div className="pointer-events-auto" onClick={(e) => { e.stopPropagation(); toggleSelect(item.name); }}>
-                                        <div className={clsx(
-                                            "w-5 h-5 rounded border flex items-center justify-center transition-all",
-                                            selectedItems.has(item.name) 
-                                                ? "bg-blue-500 border-blue-500 text-white" 
-                                                : "border-slate-300 bg-white opacity-0 group-hover:opacity-100 hover:border-blue-400"
-                                        )}>
-                                            {selectedItems.has(item.name) && <CheckCircle2 size={12} />}
-                                        </div>
-                                    </div>
-                                </div>
-                                <div>
-                                    <p className="font-medium text-slate-700 text-sm truncate" title={item.name}>{item.name}</p>
-                                    <p className="text-[10px] text-slate-400 mt-1 font-medium">
-                                        {item.isDirectory ? 'Folder' : formatBytes(item.size || 0)}
-                                    </p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="border border-slate-200 rounded-xl overflow-hidden bg-white shadow-sm mb-10">
-                        <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 text-slate-500 text-xs uppercase border-b border-slate-200 font-medium">
-                                <tr>
-                                    <th className="w-10 px-4 py-3">
-                                        <input 
-                                            type="checkbox" 
-                                            checked={selectedItems.size === items.length && items.length > 0}
-                                            onChange={toggleSelectAll}
-                                            className="w-3.5 h-3.5 rounded border-slate-300 bg-white checked:bg-blue-500 cursor-pointer"
-                                        />
-                                    </th>
-                                    <th className="px-4 py-3 font-medium">Name</th>
-                                    <th className="px-4 py-3 font-medium hidden md:table-cell">Size</th>
-                                    <th className="px-4 py-3 font-medium hidden lg:table-cell">Modified</th>
-                                    <th className="px-4 py-3 w-10"></th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {items.map((item, i) => (
-                                    <tr 
-                                        key={i} 
-                                        onClick={() => handleItemClick(item)}
-                                        className={clsx(
-                                            "group transition-colors cursor-pointer select-none",
-                                            selectedItems.has(item.name) ? "bg-blue-50/50 hover:bg-blue-100/50" : "hover:bg-slate-50"
-                                        )}
-                                    >
-                                        <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                            <input 
-                                                type="checkbox" 
-                                                checked={selectedItems.has(item.name)}
-                                                onChange={() => toggleSelect(item.name)}
-                                                className="w-3.5 h-3.5 rounded border-slate-300 bg-white checked:bg-blue-500 cursor-pointer"
-                                            />
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            <div className="flex items-center gap-3">
-                                                <FileIcon name={item.name} isDirectory={item.isDirectory} size={18} />
-                                                <span className={clsx("font-medium truncate", selectedItems.has(item.name) ? "text-blue-700" : "text-slate-700")}>
-                                                    {item.name}
-                                                </span>
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-slate-500 hidden md:table-cell">
-                                            {item.isDirectory ? '--' : formatBytes(item.size || 0)}
-                                        </td>
-                                        <td className="px-4 py-3 text-slate-500 hidden lg:table-cell">
-                                            {item.date || 'Today'}
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <button className="p-1 text-slate-400 hover:text-slate-900 rounded opacity-0 group-hover:opacity-100 transition-opacity">
-                                                <MoreVertical size={16} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                )}
-            </>
-        )}
-      </div>
+// ─── Main File Browser Page ──────────────────────────────────────────────────
+export default function FilesPage() {
+  const { bucketId } = useParams();
+  const navigate = useNavigate();
 
-      {/* Download Progress Dialog */}
-      {downloadInfo && (
-        <div className="fixed bottom-6 right-6 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden animate-in slide-in-from-bottom-5 duration-300 z-50">
-            {/* Same as before... */}
-            <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
-                <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-2">
-                    {downloadInfo.status === 'downloading' || downloadInfo.status === 'starting' ? (
-                        <Loader2 size={14} className="animate-spin text-blue-600" />
-                    ) : downloadInfo.status === 'completed' ? (
-                        <CheckCircle2 size={14} className="text-green-600" />
-                    ) : (
-                        <X size={14} className="text-red-600" />
-                    )}
-                    {downloadInfo.status === 'completed' ? 'Download Complete' : 'Downloading...'}
-                </h3>
-                {downloadInfo.status === 'completed' && (
-                    <button onClick={() => setDownloadInfo(null)} className="text-slate-400 hover:text-slate-600">
-                        <X size={14} />
-                    </button>
-                )}
-            </div>
-            <div className="p-3">
-                <div className="flex items-center gap-3 mb-2">
-                    <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
-                        <FileText size={16} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                        <p className="font-medium text-slate-900 truncate text-xs">{downloadInfo.filename}</p>
-                        <p className="text-[10px] text-slate-500">
-                            {downloadInfo.status === 'starting' ? 'Connecting...' : 
-                             `${downloadInfo.progress}% • ${downloadInfo.total ? formatBytes(downloadInfo.total) : ''}`}
-                        </p>
-                    </div>
-                </div>
-                
-                <div className="w-full bg-slate-100 rounded-full h-1 overflow-hidden">
-                    <div 
-                        className={clsx(
-                            "h-full transition-all duration-300",
-                            downloadInfo.status === 'completed' ? "bg-green-500" : 
-                            downloadInfo.status === 'error' ? "bg-red-500" : "bg-blue-600"
-                        )}
-                        style={{ width: `${downloadInfo.progress}%` }}
-                    />
-                </div>
-            </div>
-        </div>
-      )}
+  // State
+  const [files, setFiles] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [bucketInfo, setBucketInfo] = useState(null);
+  const [folderStack, setFolderStack] = useState([]);
+  const [viewMode, setViewMode] = useState('list');
+  const [sortKey, setSortKey] = useState('name');
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState(new Set());
 
-      {/* Sync Progress Toast */}
-      {syncStatus && (
-        <div className="fixed bottom-6 right-6 w-80 bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden z-50" style={{animation: 'slideUp 0.3s ease'}}>
-          <div className={clsx(
-            "p-3 border-b border-slate-100 flex justify-between items-center",
-            syncStatus.type === 'upload' ? 'bg-purple-50/60' :
-            syncStatus.type === 'download' ? 'bg-emerald-50/60' :
-            syncStatus.type === 'complete' ? 'bg-green-50/60' :
-            syncStatus.type === 'error' ? 'bg-red-50/60' : 'bg-slate-50/60'
-          )}>
-            <h3 className="font-semibold text-slate-900 text-sm flex items-center gap-2">
-              {syncStatus.active ? (
-                <Loader2 size={14} className={clsx(
-                  'animate-spin',
-                  syncStatus.type === 'upload' ? 'text-purple-600' : 'text-emerald-600'
-                )} />
-              ) : syncStatus.type === 'error' ? (
-                <X size={14} className="text-red-500" />
-              ) : (
-                <CheckCircle2 size={14} className="text-green-600" />
-              )}
-              {syncStatus.type === 'upload' ? 'Uploading to S3...' :
-               syncStatus.type === 'download' ? 'Downloading from S3...' :
-               syncStatus.type === 'complete' ? 'Sync Complete' :
-               syncStatus.type === 'error' ? 'Sync Error' : 'Syncing...'}
-            </h3>
-            {!syncStatus.active && (
-              <button onClick={() => setSyncStatus(null)} className="text-slate-400 hover:text-slate-600">
-                <X size={14} />
+  // Dialogs
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [fileToRename, setFileToRename] = useState(null);
+
+  // ── Fetch ────────────────────────────────────────────────────────────────
+  const fetchFiles = useCallback(async () => {
+    if (!bucketId) { setLoading(false); return; }
+    setLoading(true);
+    try {
+      const bucketRes = await window.electronAPI.dbQuery('SELECT name FROM "Bucket" WHERE id = $1', [bucketId]);
+      if (bucketRes.rows.length > 0) {
+        const bucket = bucketRes.rows[0];
+        setBucketInfo(bucket);
+        const physPath = [ROOT_PATH, bucket.name, ...folderStack.map(f => f.name)].join('/');
+        const content = await window.electronAPI.listContent({ folderPath: physPath, sortBy: 'az' });
+        setFiles(content || []);
+      }
+    } catch (err) {
+      console.error('fetchFiles error:', err);
+      setFiles([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [bucketId, folderStack]);
+
+  useEffect(() => {
+    fetchFiles();
+    let unsubs = [];
+    if (window.electronAPI?.onFileChange) {
+      ['add', 'unlink', 'addDir', 'unlinkDir'].forEach(evt => {
+        unsubs.push(window.electronAPI.onFileChange(evt, fetchFiles));
+      });
+    }
+    const interval = setInterval(fetchFiles, 30000);
+    return () => { unsubs.forEach(fn => fn()); clearInterval(interval); };
+  }, [fetchFiles]);
+
+  // ── Sorting + filtering ──────────────────────────────────────────────────
+  const currentFiles = useMemo(() => {
+    let list = [...files];
+    if (search.trim()) {
+      list = list.filter(f => f.name.toLowerCase().includes(search.toLowerCase()));
+    }
+    return list.sort((a, b) => {
+      if (a.isFolder && !b.isFolder) return -1;
+      if (!a.isFolder && b.isFolder) return 1;
+      switch (sortKey) {
+        case 'name': return a.name.localeCompare(b.name);
+        case 'size': return (b.size || 0) - (a.size || 0);
+        case 'modifiedAt': return new Date(b.updatedAt) - new Date(a.updatedAt);
+        default: return 0;
+      }
+    });
+  }, [files, sortKey, search]);
+
+  // ── Navigation ───────────────────────────────────────────────────────────
+  const navigateToFolder = (folder) => {
+    setFolderStack(prev => [...prev, { id: folder.id, name: folder.name }]);
+    setSelected(new Set());
+  };
+
+  const navigateToBreadcrumb = (index) => {
+    setFolderStack(prev => prev.slice(0, index));
+    setSelected(new Set());
+  };
+
+  // ── Selection ────────────────────────────────────────────────────────────
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected(prev => prev.size === currentFiles.length ? new Set() : new Set(currentFiles.map(f => f.id)));
+  };
+
+  // ── Actions ──────────────────────────────────────────────────────────────
+  const handleAction = async (action, file) => {
+    if (action === 'rename') {
+      setFileToRename(file);
+      setRenameOpen(true);
+      return;
+    }
+    if (action === 'delete') {
+      if (!confirm(`Are you sure you want to delete "${file.name}"?`)) return;
+      alert('Delete functionality coming in next update.');
+      return;
+    }
+    // 'download' option removed — files already sync locally via SyncManager
+  };
+
+  // Click folder → navigate in, click file → open with native app
+  const handleItemClick = async (file) => {
+    if (file.isFolder) {
+      navigateToFolder(file);
+    } else {
+      // Build full local path and open with the OS default application
+      const parts = [ROOT_PATH, bucketInfo?.name, ...folderStack.map(f => f.name), file.name];
+      const localPath = parts.join('/');
+      try {
+        await window.electronAPI.openFile(localPath);
+      } catch {
+        console.warn('[FilesPage] Could not open file:', localPath);
+      }
+    }
+  };
+
+  return (
+    <div className="space-y-4 p-6 h-full overflow-auto">
+      {/* ── Toolbar ──────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+
+        {/* Breadcrumbs */}
+        <nav className="flex items-center gap-1 text-sm">
+          <button
+            onClick={() => navigateToBreadcrumb(0)}
+            className="text-muted-foreground hover:text-foreground transition-colors font-medium"
+          >
+            All Files
+          </button>
+          {folderStack.map((segment, i) => (
+            <React.Fragment key={i}>
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              <button
+                onClick={() => navigateToBreadcrumb(i + 1)}
+                className={i === folderStack.length - 1 ? "font-medium text-foreground" : "text-muted-foreground hover:text-foreground transition-colors"}
+              >
+                {segment.name}
               </button>
-            )}
+            </React.Fragment>
+          ))}
+        </nav>
+
+        {/* Controls */}
+        <div className="flex items-center gap-2">
+          <Select value={sortKey} onValueChange={setSortKey}>
+            <SelectTrigger className="w-[140px] h-8 text-xs">
+              <ArrowUpDown className="mr-1 h-3 w-3" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="size">Size</SelectItem>
+              <SelectItem value="modifiedAt">Modified</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={fetchFiles} title="Refresh">
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+
+          {/* View Toggle */}
+          <div className="flex items-center border rounded-md">
+            <Button
+              variant={viewMode === "list" ? "secondary" : "ghost"}
+              size="icon"
+              className="h-8 w-8 rounded-r-none"
+              onClick={() => setViewMode("list")}
+            >
+              <List className="h-4 w-4" />
+            </Button>
+            <Button
+              variant={viewMode === "grid" ? "secondary" : "ghost"}
+              size="icon"
+              className="h-8 w-8 rounded-l-none"
+              onClick={() => setViewMode("grid")}
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </Button>
           </div>
 
-          <div className="p-3">
-            {/* Upload row */}
-            {syncStatus.type === 'upload' && (
-              <div className="flex items-center gap-3">
-                <div className="p-1.5 bg-purple-100 text-purple-600 rounded-lg flex-shrink-0">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 truncate text-xs">{syncStatus.filename}</p>
-                  <p className="text-[10px] text-purple-600 font-semibold uppercase tracking-wider">Uploading</p>
-                </div>
-              </div>
-            )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => setNewFolderOpen(true)}
+            disabled={!bucketInfo}
+          >
+            <FolderPlus className="h-4 w-4" />
+            New Folder
+          </Button>
+          <Button
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setUploadOpen(true)}
+            disabled={!bucketInfo}
+          >
+            <Upload className="h-4 w-4" />
+            Upload
+          </Button>
+        </div>
+      </div>
 
-            {/* Download row */}
-            {syncStatus.type === 'download' && (
-              <div className="flex items-center gap-3">
-                <div className="p-1.5 bg-emerald-100 text-emerald-600 rounded-lg flex-shrink-0">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 truncate text-xs">{syncStatus.filename}</p>
-                  <p className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wider">Downloading</p>
-                </div>
-              </div>
-            )}
+      {/* ── Search ───────────────────────────────────────────────────────── */}
+      <div className="relative max-w-sm">
+        <input
+          type="text"
+          placeholder="Search files and folders..."
+          className="w-full rounded-md border border-input bg-background px-3 py-1.5 pl-9 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+        />
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z" />
+        </svg>
+      </div>
 
-            {/* Info / Complete / Error */}
-            {(syncStatus.type === 'info' || syncStatus.type === 'complete' || syncStatus.type === 'error') && (
-              <div className="flex items-center gap-3">
-                <div className={clsx(
-                  'p-1.5 rounded-lg flex-shrink-0',
-                  syncStatus.type === 'complete' ? 'bg-green-100 text-green-600' :
-                  syncStatus.type === 'error' ? 'bg-red-100 text-red-600' : 'bg-slate-100 text-slate-500'
-                )}>
-                  <Cloud size={16} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-slate-900 text-xs">{syncStatus.message || 'Processing...'}</p>
-                  {syncStatus.type === 'complete' && (
-                    <p className="text-[10px] text-green-600 font-semibold uppercase tracking-wider">Complete</p>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
+      {/* ── Selection bar ────────────────────────────────────────────────── */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 text-sm">
+          <span className="text-muted-foreground">{selected.size} selected</span>
+          <Button variant="outline" size="sm" className="h-7 text-xs">
+            <Download className="mr-1 h-3 w-3" /> Download
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 className="mr-1 h-3 w-3" /> Delete
+          </Button>
         </div>
       )}
 
+      {/* ── Loading ──────────────────────────────────────────────────────── */}
+      {loading && (
+        <div className="text-center py-10 text-muted-foreground text-sm">Loading files...</div>
+      )}
+
+      {/* ── No bucket ────────────────────────────────────────────────────── */}
+      {!loading && !bucketId && (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <HardDrive className="h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-lg font-medium">No bucket selected</p>
+          <p className="text-sm text-muted-foreground mt-1">Please select a bucket from the Buckets page to view files.</p>
+          <Button className="mt-4 gap-1.5" onClick={() => navigate('/')}>
+            <HardDrive className="h-4 w-4" /> Go to Buckets
+          </Button>
+        </div>
+      )}
+
+      {/* ── Empty ────────────────────────────────────────────────────────── */}
+      {!loading && bucketId && currentFiles.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <FolderOpen className="h-12 w-12 text-muted-foreground mb-4" />
+          <p className="text-lg font-medium">This folder is empty</p>
+          <p className="text-sm text-muted-foreground mt-1">Upload files or create a new folder to get started</p>
+          <Button className="mt-4 gap-1.5" onClick={() => setUploadOpen(true)}>
+            <Upload className="h-4 w-4" /> Upload Files
+          </Button>
+        </div>
+      )}
+
+      {/* ── List View ────────────────────────────────────────────────────── */}
+      {!loading && viewMode === "list" && currentFiles.length > 0 && (
+        <div className="rounded-lg border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="w-10">
+                  <Checkbox
+                    checked={selected.size === currentFiles.length && currentFiles.length > 0}
+                    onCheckedChange={toggleSelectAll}
+                    aria-label="Select all"
+                  />
+                </TableHead>
+                <TableHead>Name</TableHead>
+                <TableHead className="hidden md:table-cell">Size</TableHead>
+                <TableHead className="hidden lg:table-cell">Modified</TableHead>
+                <TableHead className="hidden lg:table-cell">Owner</TableHead>
+                <TableHead className="w-10" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {currentFiles.map(file => (
+                <TableRow
+                  key={file.id}
+                  className="group cursor-pointer"
+                  data-state={selected.has(file.id) ? "selected" : undefined}
+                  onClick={() => handleItemClick(file)}
+                >
+                  <TableCell onClick={e => { e.stopPropagation(); toggleSelect(file.id); }}>
+                    <Checkbox
+                      checked={selected.has(file.id)}
+                      onCheckedChange={() => toggleSelect(file.id)}
+                      aria-label={`Select ${file.name}`}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2.5">
+                      <FileIcon file={file} />
+                      <span className="text-sm font-medium truncate">{file.name}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="hidden md:table-cell text-muted-foreground text-sm">
+                    {file.isFolder ? '--' : formatBytes(file.size)}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">
+                    {formatDate(file.updatedAt)}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">
+                    Admin
+                  </TableCell>
+                  <TableCell onClick={e => e.stopPropagation()}>
+                    <FileContextMenu file={file} onAction={handleAction} />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
+
+      {/* ── Grid View ────────────────────────────────────────────────────── */}
+      {!loading && viewMode === "grid" && currentFiles.length > 0 && (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+          {currentFiles.map(file => (
+            <Card
+              key={file.id}
+              className={`group cursor-pointer transition-colors hover:bg-accent/50 ${selected.has(file.id) ? "ring-2 ring-primary" : ""}`}
+              onClick={() => handleItemClick(file)}
+            >
+              <CardContent className="p-3">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
+                    <FileIcon file={file} className="h-5 w-5" />
+                  </div>
+                  <div onClick={e => e.stopPropagation()}>
+                    <FileContextMenu file={file} onAction={handleAction} />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-sm font-medium truncate">{file.name}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {file.isFolder ? 'Folder' : formatBytes(file.size)}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {/* ── Dialogs ──────────────────────────────────────────────────────── */}
+      <FileUploadDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        bucketInfo={bucketInfo}
+        folderStack={folderStack}
+      />
+
+      <NewFolderDialog
+        open={newFolderOpen}
+        onOpenChange={setNewFolderOpen}
+        bucketInfo={bucketInfo}
+        folderStack={folderStack}
+        onFolderCreated={fetchFiles}
+      />
+
+      <RenameDialog
+        open={renameOpen}
+        onOpenChange={setRenameOpen}
+        file={fileToRename}
+        onRenamed={fetchFiles}
+      />
     </div>
   );
-};
-
-export default FilesPage;
+}

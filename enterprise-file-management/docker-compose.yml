@@ -16,21 +16,21 @@ services:
     networks:
       - app_network
 
-  webapp:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: file_mgmt_webapp
-    restart: always
-    ports:
-      - "3005:3000"
-    environment:
-      - DATABASE_URL=postgresql://myuser:mypassword@postgres:5432/filemanagement
-      - NEXT_PUBLIC_API_URL=http://localhost:3005
-    depends_on:
-      - postgres
-    networks:
-      - app_network
+  # webapp:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: file_mgmt_webapp
+  #   restart: always
+  #   ports:
+  #     - "3005:3000"
+  #   environment:
+  #     - DATABASE_URL=postgresql://myuser:mypassword@postgres:5432/filemanagement
+  #     - NEXT_PUBLIC_API_URL=http://localhost:3005
+  #   depends_on:
+  #     - postgres
+  #   networks:
+  #     - app_network
 
   prisma-studio:
     image: node:20-alpine
