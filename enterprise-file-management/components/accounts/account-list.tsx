@@ -34,6 +34,7 @@ import {
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 import { RefreshCw, MoreHorizontal, Edit, Power, Trash2, CheckCircle2, XCircle } from "lucide-react"
+import { fetchWithAuth } from "@/lib/api"
 
 interface Account {
     id: string
@@ -56,17 +57,11 @@ export function AccountList({ initialAccounts }: AccountListProps) {
     const [editOpen, setEditOpen] = useState(false)
     const [editingAccount, setEditingAccount] = useState<Account | null>(null)
 
-    function getAuthHeader(): Record<string, string> {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
-        return token ? { 'Authorization': `Bearer ${token}` } : {}
-    }
-
     const handleSync = async (accountId: string) => {
         setSyncing(accountId)
         try {
-            const res = await fetch(`/api/accounts/${accountId}/sync`, {
+            const res = await fetchWithAuth(`/api/accounts/${accountId}/sync`, {
                 method: "POST",
-                headers: getAuthHeader()
             })
 
             if (res.ok) {
@@ -92,11 +87,10 @@ export function AccountList({ initialAccounts }: AccountListProps) {
         const name = formData.get("name") as string
 
         try {
-            const res = await fetch(`/api/accounts/${editingAccount.id}`, {
+            const res = await fetchWithAuth(`/api/accounts/${editingAccount.id}`, {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
-                    ...getAuthHeader()
                 },
                 body: JSON.stringify({ name }),
             })
@@ -116,11 +110,10 @@ export function AccountList({ initialAccounts }: AccountListProps) {
 
     const handleToggleStatus = async (account: Account) => {
         try {
-            const res = await fetch(`/api/accounts/${account.id}`, {
+            const res = await fetchWithAuth(`/api/accounts/${account.id}`, {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
-                    ...getAuthHeader()
                 },
                 body: JSON.stringify({ isActive: !account.isActive }),
             })
@@ -140,9 +133,8 @@ export function AccountList({ initialAccounts }: AccountListProps) {
         if (!confirm(`Are you sure you want to delete account "${account.name}"? This cannot be undone.`)) return
 
         try {
-            const res = await fetch(`/api/accounts/${account.id}`, {
+            const res = await fetchWithAuth(`/api/accounts/${account.id}`, {
                 method: "DELETE",
-                headers: getAuthHeader()
             })
 
             if (res.ok) {

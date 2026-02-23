@@ -3,7 +3,7 @@
 
 import * as React from "react"
 import { toast } from "sonner"
-import { getAuthHeader } from "@/lib/token"
+import { fetchWithAuth } from "@/lib/api"
 
 export interface UploadFile {
     id: string
@@ -85,12 +85,12 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
             }
 
             setFiles(prev => prev.map(f => f.id === fileItem.id ? { ...f, status: 'complete', progress: 100 } : f))
-            toast.success(`Uploaded ${fileItem.name}`)
+            toast.success(`Uploaded ${fileItem.name}`, { duration: 2000 })
 
         } catch (error) {
             console.error(error)
             setFiles(prev => prev.map(f => f.id === fileItem.id ? { ...f, status: 'error', progress: 0 } : f))
-            toast.error(`Failed to upload ${fileItem.name}`)
+            toast.error(`Failed to upload ${fileItem.name}`, { duration: 2000 })
         } finally {
             setIsProcessing(false) // Trigger effect to pick up next file
         }
@@ -98,11 +98,7 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
 
     const uploadSimple = async (fileItem: UploadFile) => {
         // 1. Get Presigned URL
-        const presignRes = await fetch(`/api/files/presigned?bucketId=${fileItem.bucketId}&name=${encodeURIComponent(fileItem.name)}&parentId=${fileItem.parentId || ''}&contentType=${fileItem.file.type || 'application/octet-stream'}`, {
-            headers: {
-                ...getAuthHeader()
-            }
-        })
+        const presignRes = await fetchWithAuth(`/api/files/presigned?bucketId=${fileItem.bucketId}&name=${encodeURIComponent(fileItem.name)}&parentId=${fileItem.parentId || ''}&contentType=${fileItem.file.type || 'application/octet-stream'}`)
 
         if (!presignRes.ok) throw new Error('Failed to get upload URL')
 
@@ -120,11 +116,10 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
         if (!uploadRes.ok) throw new Error('Failed to upload to S3')
 
         // 3. Create DB Record
-        const dbRes = await fetch('/api/files', {
+        const dbRes = await fetchWithAuth('/api/files', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                ...getAuthHeader()
             },
             body: JSON.stringify({
                 name: fileItem.name,
@@ -144,9 +139,9 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
         const totalParts = Math.ceil(fileItem.size / PART_SIZE);
 
         // 1. Initiate Multipart
-        const initRes = await fetch('/api/files/multipart/initiate', {
+        const initRes = await fetchWithAuth('/api/files/multipart/initiate', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 bucketId: fileItem.bucketId,
                 name: fileItem.name,
@@ -166,9 +161,9 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
             const end = Math.min(start + PART_SIZE, fileItem.size);
             const chunk = fileItem.file.slice(start, end);
 
-            const signRes = await fetch('/api/files/multipart/sign-part', {
+            const signRes = await fetchWithAuth('/api/files/multipart/sign-part', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ bucketId: fileItem.bucketId, key, uploadId, partNumber })
             });
 
@@ -207,9 +202,9 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
 
         parts.sort((a, b) => a.PartNumber - b.PartNumber);
 
-        const completeRes = await fetch('/api/files/multipart/complete', {
+        const completeRes = await fetchWithAuth('/api/files/multipart/complete', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 bucketId: fileItem.bucketId,
                 key,

@@ -7,6 +7,8 @@ import './globals.css'
 import { AuthProvider } from '@/components/providers/AuthProvider'
 import { UploadProvider } from '@/components/providers/upload-provider'
 import { GlobalUploadIndicator } from '@/components/global-upload-indicator'
+import { DownloadProvider } from '@/components/providers/download-provider'
+import { GlobalDownloadIndicator } from '@/components/global-download-indicator'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
@@ -32,9 +34,12 @@ export default function RootLayout({
         >
           <AuthProvider>
             <UploadProvider>
-              {children}
-              <GlobalUploadIndicator />
-              <Toaster />
+              <DownloadProvider>
+                {children}
+                <GlobalUploadIndicator />
+                <GlobalDownloadIndicator />
+                <Toaster />
+              </DownloadProvider>
             </UploadProvider>
           </AuthProvider>
         </ThemeProvider>

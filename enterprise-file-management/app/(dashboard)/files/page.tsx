@@ -17,8 +17,9 @@ import { SearchCommandDialog } from "@/components/search-command"
 import { useSearchParams } from "next/navigation"
 
 import { NewFolderDialog } from "@/components/new-folder-dialog"
+import { Suspense } from "react"
 
-export default function FilesPage() {
+function FilesPageContent() {
   const [uploadOpen, setUploadOpen] = React.useState(false)
   const [newFolderOpen, setNewFolderOpen] = React.useState(false)
   // State for current path - lifted from FileBrowser
@@ -73,5 +74,13 @@ export default function FilesPage() {
         }}
       />
     </>
+  )
+}
+
+export default function FilesPage() {
+  return (
+    <Suspense fallback={<div>Loading...</div>}>
+      <FilesPageContent />
+    </Suspense>
   )
 }

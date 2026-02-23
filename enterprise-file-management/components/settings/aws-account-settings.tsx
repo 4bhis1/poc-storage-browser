@@ -50,11 +50,7 @@ interface AwsAccount {
     }
 }
 
-// Stable helper — defined outside the component so it's never stale in closures
-function getAuthHeader(): Record<string, string> {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
-    return token ? { 'Authorization': `Bearer ${token}` } : {}
-}
+import { fetchWithAuth } from "@/lib/api"
 
 export function AwsAccountSettings() {
     const [accounts, setAccounts] = React.useState<AwsAccount[]>([])
@@ -66,9 +62,8 @@ export function AwsAccountSettings() {
 
     const fetchAccounts = React.useCallback(async () => {
         try {
-            const res = await fetch("/api/accounts", {
+            const res = await fetchWithAuth("/api/accounts", {
                 headers: {
-                    ...getAuthHeader(),
                     'Cache-Control': 'no-cache',
                     'Pragma': 'no-cache',
                 },
@@ -97,11 +92,10 @@ export function AwsAccountSettings() {
         const data = Object.fromEntries(formData)
 
         try {
-            const res = await fetch("/api/accounts", {
+            const res = await fetchWithAuth("/api/accounts", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    ...getAuthHeader()
                 },
                 body: JSON.stringify(data),
             })
@@ -122,9 +116,8 @@ export function AwsAccountSettings() {
     const handleSync = async (accountId: string) => {
         setSyncing(accountId)
         try {
-            const res = await fetch(`/api/accounts/${accountId}/sync`, {
+            const res = await fetchWithAuth(`/api/accounts/${accountId}/sync`, {
                 method: "POST",
-                headers: getAuthHeader()
             })
 
             if (res.ok) {
@@ -150,11 +143,10 @@ export function AwsAccountSettings() {
         const name = formData.get("name") as string
 
         try {
-            const res = await fetch(`/api/accounts/${editingAccount.id}`, {
+            const res = await fetchWithAuth(`/api/accounts/${editingAccount.id}`, {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
-                    ...getAuthHeader()
                 },
                 body: JSON.stringify({ name }),
             })
@@ -174,11 +166,10 @@ export function AwsAccountSettings() {
 
     const handleToggleStatus = async (account: AwsAccount) => {
         try {
-            const res = await fetch(`/api/accounts/${account.id}`, {
+            const res = await fetchWithAuth(`/api/accounts/${account.id}`, {
                 method: "PATCH",
                 headers: {
                     "Content-Type": "application/json",
-                    ...getAuthHeader()
                 },
                 body: JSON.stringify({ isActive: !account.isActive }),
             })
@@ -198,9 +189,8 @@ export function AwsAccountSettings() {
         if (!confirm(`Are you sure you want to delete account "${account.name}"? This cannot be undone.`)) return
 
         try {
-            const res = await fetch(`/api/accounts/${account.id}`, {
+            const res = await fetchWithAuth(`/api/accounts/${account.id}`, {
                 method: "DELETE",
-                headers: getAuthHeader()
             })
 
             if (res.ok) {

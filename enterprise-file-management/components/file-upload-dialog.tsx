@@ -3,7 +3,6 @@
 import * as React from "react"
 import { CloudUpload, File, X, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { getAuthHeader } from "@/lib/token"
 import {
   Dialog,
   DialogContent,
@@ -70,7 +69,7 @@ export function FileUploadDialog({ open, onOpenChange, bucketId, currentPath }: 
 
     if (bucketId) {
       addFiles(selectedFiles, bucketId, parentId)
-      toast.success("Uploads started in background")
+      toast.success("Uploads started in background", { duration: 2000 })
       handleClose(false)
     }
   }

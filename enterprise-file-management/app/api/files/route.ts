@@ -108,18 +108,38 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // 4. Create Record in DB
-        const file = await prisma.fileObject.create({
-            data: {
-                name,
-                bucketId,
-                parentId: parentId || null,
-                isFolder: isFolder || false,
-                size: size || 0,
-                mimeType: mimeType || 'application/octet-stream',
-                key: key
+        // 4. Update or Create Record in DB (Upsert behavior without unique constraint)
+        const existingFile = await prisma.fileObject.findFirst({
+            where: {
+                bucketId: bucketId,
+                key: key,
+                isFolder: isFolder || false
             }
         });
+
+        let file;
+        if (existingFile) {
+            file = await prisma.fileObject.update({
+                where: { id: existingFile.id },
+                data: {
+                    size: size || 0,
+                    mimeType: mimeType || 'application/octet-stream',
+                    updatedAt: new Date()
+                }
+            });
+        } else {
+            file = await prisma.fileObject.create({
+                data: {
+                    name,
+                    bucketId,
+                    parentId: parentId || null,
+                    isFolder: isFolder || false,
+                    size: size || 0,
+                    mimeType: mimeType || 'application/octet-stream',
+                    key: key
+                }
+            });
+        }
 
         return NextResponse.json(file);
     } catch (error) {

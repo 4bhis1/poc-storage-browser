@@ -14,11 +14,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
-
-function getAuthHeader(): Record<string, string> {
-    const token = typeof window !== "undefined" ? localStorage.getItem("accessToken") : null
-    return token ? { Authorization: `Bearer ${token}` } : {}
-}
+import { fetchWithAuth } from "@/lib/api"
 
 interface AddAccountModalProps {
     onSuccess?: () => void
@@ -36,11 +32,10 @@ export function AddAccountModal({ onSuccess }: AddAccountModalProps) {
         const data = Object.fromEntries(formData)
 
         try {
-            const res = await fetch("/api/accounts", {
+            const res = await fetchWithAuth("/api/accounts", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",
-                    ...getAuthHeader(),
                 },
                 body: JSON.stringify(data),
             })

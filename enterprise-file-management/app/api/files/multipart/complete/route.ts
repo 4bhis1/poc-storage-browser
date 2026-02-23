@@ -67,18 +67,38 @@ export async function POST(request: NextRequest) {
 
         await s3.send(command);
 
-        // Create Database Record
-        const fileRecord = await prisma.fileObject.create({
-            data: {
-                name,
-                key, // Use the full S3 key
-                size: Number(size),
-                mimeType,
-                bucketId,
-                parentId: parentId || null,
-                isFolder: false,
+        // Create or Update Database Record
+        const existingFile = await prisma.fileObject.findFirst({
+            where: {
+                bucketId: bucketId,
+                key: key,
+                isFolder: false
             }
         });
+
+        let fileRecord;
+        if (existingFile) {
+            fileRecord = await prisma.fileObject.update({
+                where: { id: existingFile.id },
+                data: {
+                    size: Number(size),
+                    mimeType,
+                    updatedAt: new Date()
+                }
+            });
+        } else {
+            fileRecord = await prisma.fileObject.create({
+                data: {
+                    name,
+                    key, // Use the full S3 key
+                    size: Number(size),
+                    mimeType,
+                    bucketId,
+                    parentId: parentId || null,
+                    isFolder: false,
+                }
+            });
+        }
 
         return NextResponse.json({ status: 'success', file: fileRecord });
 

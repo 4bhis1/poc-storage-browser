@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
+import { fetchWithAuth } from "@/lib/api"
 
 interface NewFolderDialogProps {
     open: boolean
@@ -46,7 +47,7 @@ export function NewFolderDialog({
         try {
             const parentId = currentPath.length > 0 ? currentPath[currentPath.length - 1].id : null
 
-            const res = await fetch("/api/files", {
+            const res = await fetchWithAuth("/api/files", {
                 method: "POST",
                 headers: {
                     "Content-Type": "application/json",

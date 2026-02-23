@@ -55,6 +55,7 @@ import { Label } from "@/components/ui/label"
 import { toast } from "sonner"
 import { mockBuckets, formatBytes, formatDate } from "@/lib/mock-data"
 import { SearchCommandDialog } from "@/components/search-command"
+import { fetchWithAuth } from "@/lib/api"
 
 const storageClassColors: Record<string, string> = {
   STANDARD: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
@@ -88,11 +89,6 @@ export default function BucketsPage() {
 
   const [syncing, setSyncing] = React.useState<string | null>(null)
 
-  const getAuthHeader = (): Record<string, string> => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : null
-    return token ? { 'Authorization': `Bearer ${token}` } : {}
-  }
-
   const fetchBuckets = async (pageNum: number, isNewFilter: boolean = false) => {
     try {
       if (pageNum === 1) setLoading(true)
@@ -105,9 +101,7 @@ export default function BucketsPage() {
       })
       if (filterAccountId) params.append('accountId', filterAccountId)
 
-      const res = await fetch(`/api/buckets?${params.toString()}`, {
-        headers: { ...getAuthHeader() }
-      })
+      const res = await fetchWithAuth(`/api/buckets?${params.toString()}`)
 
       if (res.ok) {
         const result = await res.json()
@@ -168,9 +162,8 @@ export default function BucketsPage() {
   const handleSync = async (bucketId: string) => {
     setSyncing(bucketId)
     try {
-      const res = await fetch(`/api/buckets/${bucketId}/sync`, {
+      const res = await fetchWithAuth(`/api/buckets/${bucketId}/sync`, {
         method: 'POST',
-        headers: { ...getAuthHeader() }
       })
       if (res.ok) {
         toast.success("Bucket synced successfully")
@@ -190,9 +183,7 @@ export default function BucketsPage() {
 
   const fetchAccounts = async () => {
     try {
-      const res = await fetch('/api/accounts?isActive=true', {
-        headers: { ...getAuthHeader() }
-      })
+      const res = await fetchWithAuth('/api/accounts?isActive=true')
       if (res.ok) {
         const data = await res.json()
         setAccounts(data)
@@ -228,7 +219,7 @@ export default function BucketsPage() {
     }
 
     try {
-      const res = await fetch('/api/buckets', {
+      const res = await fetchWithAuth('/api/buckets', {
         method: 'POST',
         body: JSON.stringify({
           name,
@@ -239,7 +230,6 @@ export default function BucketsPage() {
         }),
         headers: {
           'Content-Type': 'application/json',
-          ...getAuthHeader()
         }
       })
 

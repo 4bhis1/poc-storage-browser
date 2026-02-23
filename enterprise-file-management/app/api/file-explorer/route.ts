@@ -53,11 +53,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
+    const search = searchParams.get('search');
+
     // List Objects
     const whereClause: any = {
       bucketId: bucketId,
-      parentId: parentId || null
     };
+
+    if (search && search.trim() !== '') {
+      // Deep search within the current folder (or root if no parentId)
+      if (parentId) {
+        const parent = await prisma.fileObject.findUnique({ where: { id: parentId } });
+        if (parent) {
+          // Ensure prefix ends with / to search children
+          const prefix = parent.key.endsWith('/') ? parent.key : `${parent.key}/`;
+          whereClause.key = { startsWith: prefix };
+        }
+      }
+
+      whereClause.name = { contains: search.trim(), mode: 'insensitive' };
+    } else {
+      // Normal navigation: direct children only
+      whereClause.parentId = parentId || null;
+    }
 
     const files = await prisma.fileObject.findMany({
       where: whereClause,
@@ -69,17 +87,62 @@ export async function GET(request: NextRequest) {
       }
     });
 
-    const fileItems = files.map(f => ({
-      id: f.id,
-      name: f.name,
-      type: f.isFolder ? 'folder' : (f.mimeType?.includes('image') ? 'image' : f.mimeType?.includes('pdf') ? 'pdf' : 'document'),
-      size: Number(f.size) || 0,
-      modifiedAt: f.updatedAt.toISOString(),
-      owner: 'Admin', // Placeholder as per logic
-      bucket: 'prod-assets', // Placeholder
-      path: f.key,
-      children: f.children.map(c => ({ id: c.id })),
-    }));
+    // Fetch all ancestor folders if search is active
+    let folderBreadcrumbsData = new Map<string, { id: string, name: string }>();
+    if (search && search.trim() !== '' && files.length > 0) {
+      const ancestorKeys = new Set<string>();
+      files.forEach(f => {
+        const parts = f.key.split('/');
+        let currentKey = '';
+        const bound = f.isFolder ? parts.length : parts.length - 1;
+        for (let i = 0; i < bound; i++) {
+          currentKey = currentKey ? `${currentKey}/${parts[i]}` : parts[i];
+          ancestorKeys.add(currentKey);
+        }
+      });
+
+      if (ancestorKeys.size > 0) {
+        const ancestors = await prisma.fileObject.findMany({
+          where: {
+            bucketId: bucketId,
+            key: { in: Array.from(ancestorKeys) },
+            isFolder: true
+          },
+          select: { id: true, name: true, key: true }
+        });
+        ancestors.forEach(a => folderBreadcrumbsData.set(a.key, { id: a.id, name: a.name }));
+      }
+    }
+
+    const fileItems = files.map(f => {
+      let breadcrumbs: { id: string, name: string }[] | undefined = undefined;
+      if (search && search.trim() !== '') {
+        breadcrumbs = [];
+        const parts = f.key.split('/');
+        let currentKey = '';
+        const bound = f.isFolder ? parts.length : parts.length - 1;
+        for (let i = 0; i < bound; i++) {
+          currentKey = currentKey ? `${currentKey}/${parts[i]}` : parts[i];
+          const ancestor = folderBreadcrumbsData.get(currentKey);
+          if (ancestor) {
+            breadcrumbs.push(ancestor);
+          }
+        }
+      }
+
+      return {
+        id: f.id,
+        name: f.name,
+        type: f.isFolder ? 'folder' : (f.mimeType?.includes('image') ? 'image' : f.mimeType?.includes('pdf') ? 'pdf' : 'document'),
+        size: Number(f.size) || 0,
+        modifiedAt: f.updatedAt.toISOString(),
+        owner: 'Admin', // Placeholder as per logic
+        bucket: 'prod-assets', // Placeholder
+        path: f.key,
+        breadcrumbs,
+        children: f.children.map(c => ({ id: c.id })),
+      };
+    });
 
     return NextResponse.json({ files: fileItems });
   } catch (error) {

@@ -58,6 +58,9 @@ model FileObject {
   bucket    Bucket       @relation(fields: [bucketId], references: [id])
   parent    FileObject?  @relation("ParentChild", fields: [parentId], references: [id])
   children  FileObject[] @relation("ParentChild")
+
+  @@index([bucketId, key])
+  @@index([bucketId, name])
 }
 
 model User {

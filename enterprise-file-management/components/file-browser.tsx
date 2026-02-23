@@ -113,7 +113,9 @@ interface FileBrowserProps {
 }
 
 import { usePermission } from "@/lib/hooks/usePermission";
-import { getAuthHeader } from "@/lib/token";
+import { fetchWithAuth } from "@/lib/api";
+import { SearchInput } from "./search-input";
+import { useDownload } from "@/components/providers/download-provider";
 
 // ...
 
@@ -121,14 +123,17 @@ import { getAuthHeader } from "@/lib/token";
 
 export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, setPath, refreshTrigger = 0 }: FileBrowserProps) {
   const { can } = usePermission();
+  const { addDownloads } = useDownload();
   const [viewMode, setViewMode] = React.useState<ViewMode>("list")
   const [sortKey, setSortKey] = React.useState<SortKey>("name")
+  const [sortOrder, setSortOrder] = React.useState<"asc" | "desc">("asc")
   const [selected, setSelected] = React.useState<Set<string>>(new Set())
   const [files, setFiles] = React.useState<any[]>([])
   const [loading, setLoading] = React.useState(true)
   const [renameOpen, setRenameOpen] = React.useState(false)
   const [fileToRename, setFileToRename] = React.useState<any>(null)
   const [newName, setNewName] = React.useState("")
+  const [searchQuery, setSearchQuery] = React.useState("")
 
   const currentParentId = path.length > 0 ? path[path.length - 1].id : null
 
@@ -143,12 +148,9 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
       const params = new URLSearchParams()
       params.append('bucketId', bucketId)
       if (currentParentId) params.append('parentId', currentParentId)
+      if (searchQuery) params.append('search', searchQuery)
 
-      const res = await fetch(`/api/file-explorer?${params.toString()}`, {
-        headers: {
-          ...getAuthHeader()
-        }
-      })
+      const res = await fetchWithAuth(`/api/file-explorer?${params.toString()}`)
       if (res.ok) {
         const data = await res.json()
         if (data.files) {
@@ -164,7 +166,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
     } finally {
       setLoading(false)
     }
-  }, [bucketId, currentParentId])
+  }, [bucketId, currentParentId, searchQuery])
 
   // Permission Check
   const canUpload = can('WRITE', { resourceType: 'bucket' }); // Check global or contextual write permission
@@ -172,34 +174,43 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
   React.useEffect(() => {
     fetchFiles()
     setSelected(new Set())
-  }, [fetchFiles, refreshTrigger])
+  }, [fetchFiles, refreshTrigger, searchQuery])
 
   // Sorting
   const currentFiles = React.useMemo(() => {
     return [...files].sort((a, b) => {
-      // Folders first
+      // Folders always first
       if (a.type === "folder" && b.type !== "folder") return -1
       if (a.type !== "folder" && b.type === "folder") return 1
+      
+      let modifier = sortOrder === "asc" ? 1 : -1
+
       switch (sortKey) {
         case "name":
-          return a.name.localeCompare(b.name)
+          return a.name.localeCompare(b.name) * modifier
         case "size":
-          return (b.size || 0) - (a.size || 0)
+          return ((a.size || 0) - (b.size || 0)) * modifier
         case "modifiedAt":
           return (
-            new Date(b.modifiedAt).getTime() -
-            new Date(a.modifiedAt).getTime()
-          )
+            new Date(a.modifiedAt).getTime() -
+            new Date(b.modifiedAt).getTime()
+          ) * modifier
         case "owner":
-          return (a.owner || '').localeCompare(b.owner || '')
+          return (a.owner || '').localeCompare(b.owner || '') * modifier
         default:
           return 0
       }
     })
-  }, [files, sortKey])
+  }, [files, sortKey, sortOrder])
 
-  const navigateToFolder = (folder: { id: string, name: string }) => {
-    setPath([...path, folder])
+  const navigateToFolder = (folder: { id: string, name: string, breadcrumbs?: { id: string, name: string }[] }) => {
+    if (folder.breadcrumbs && folder.breadcrumbs.length > 0) {
+      setPath(folder.breadcrumbs)
+      setSearchQuery("")
+    } else {
+      setPath([...path, { id: folder.id, name: folder.name }])
+      setSearchQuery("")
+    }
   }
 
   const navigateToBreadcrumb = (index: number) => {
@@ -235,9 +246,8 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
       if (!confirm(`Are you sure you want to delete "${file.name}"?`)) return
 
       try {
-        const res = await fetch(`/api/files/${file.id}`, {
+        const res = await fetchWithAuth(`/api/files/${file.id}`, {
           method: "DELETE",
-          headers: { ...getAuthHeader() }
         })
         if (res.ok) {
           toast.success("File deleted successfully")
@@ -253,38 +263,55 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
     }
 
     if (action === "Download") {
-      try {
-        const res = await fetch(`/api/files/presigned?bucketId=${file.bucketId || bucketId}&name=${file.name}&action=download&parentId=${file.parentId || ''}`, {
-          headers: { ...getAuthHeader() }
-        })
-        if (res.ok) {
-          const { url } = await res.json()
-          if (url) {
-            window.open(url, '_blank')
-          } else {
-            toast.error("Failed to generate download URL")
-          }
-        } else {
-          toast.error("Failed to download file")
-        }
-      } catch (error) {
-        toast.error("Error downloading file")
-      }
+      addDownloads([{ id: file.id, name: file.name, bucketId: file.bucketId || bucketId || "", parentId: file.parentId || null }])
       return
     }
 
     toast.success(`${action}: ${file.name}`)
   }
 
+  const handleBulkDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selected.size} items?`)) return
+
+    let successCount = 0
+    let failCount = 0
+
+    await Promise.all(
+      Array.from(selected).map(async (id) => {
+        try {
+          const res = await fetch(`/api/files/${id}`, {
+            method: "DELETE",
+            headers: { ...getAuthHeader() }
+          })
+          if (res.ok) {
+            successCount++
+          } else {
+            failCount++
+          }
+        } catch (error) {
+          failCount++
+        }
+      })
+    )
+
+    if (successCount > 0) {
+      toast.success(`Deleted ${successCount} items successfully`)
+      fetchFiles()
+      setSelected(new Set())
+    }
+    if (failCount > 0) {
+      toast.error(`Failed to delete ${failCount} items`)
+    }
+  }
+
   const confirmRename = async () => {
     if (!fileToRename || !newName) return
 
     try {
-      const res = await fetch(`/api/files/${fileToRename.id}`, {
+      const res = await fetchWithAuth(`/api/files/${fileToRename.id}`, {
         method: "PATCH",
         headers: {
           "Content-Type": "application/json",
-          ...getAuthHeader()
         },
         body: JSON.stringify({ name: newName })
       })
@@ -299,6 +326,24 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
       }
     } catch (error) {
       toast.error("Error renaming file")
+    }
+  }
+
+  const handleBulkDownload = () => {
+    const filesToDownload = currentFiles
+      .filter(f => selected.has(f.id) && f.type !== "folder")
+      .map(f => ({
+        id: f.id,
+        name: f.name,
+        bucketId: f.bucketId || bucketId || "",
+        parentId: f.parentId || null
+      }))
+
+    if (filesToDownload.length > 0) {
+      addDownloads(filesToDownload)
+      setSelected(new Set())
+    } else {
+      toast.error("No valid files selected for download (folders cannot be downloaded directly)")
     }
   }
 
@@ -335,7 +380,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
         <DropdownMenuSeparator />
         <DropdownMenuItem
           onClick={() => handleAction("Delete", file)}
-          className="text-destructive-foreground"
+          className="text-destructive focus:bg-destructive/10 focus:text-destructive"
         >
           <Trash2 className="mr-2 h-4 w-4" />
           Delete
@@ -374,21 +419,32 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
         </nav>
 
         <div className="flex items-center gap-2">
-          <Select
-            value={sortKey}
-            onValueChange={(v) => setSortKey(v as SortKey)}
-          >
-            <SelectTrigger className="w-[140px] h-8 text-xs">
-              <ArrowUpDown className="mr-1 h-3 w-3" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="name">Name</SelectItem>
-              <SelectItem value="size">Size</SelectItem>
-              <SelectItem value="modifiedAt">Modified</SelectItem>
-              <SelectItem value="owner">Owner</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex items-center border rounded-md">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-r-none border-r"
+              onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+              title={`Sort ${sortOrder === "asc" ? "Descending" : "Ascending"}`}
+            >
+              <ArrowUpDown className={`h-4 w-4 ${sortOrder === "desc" ? "rotate-180" : ""} transition-transform`} />
+              <span className="sr-only">Toggle sort order</span>
+            </Button>
+            <Select
+              value={sortKey}
+              onValueChange={(v) => setSortKey(v as SortKey)}
+            >
+              <SelectTrigger className="w-[120px] h-8 text-xs border-0 rounded-l-none focus:ring-0">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name">Name</SelectItem>
+                <SelectItem value="size">Size</SelectItem>
+                <SelectItem value="modifiedAt">Modified</SelectItem>
+                <SelectItem value="owner">Owner</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
           <Button
             variant="ghost"
@@ -437,6 +493,10 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
         </div>
       </div>
 
+      <div className="w-full max-w-sm">
+        <SearchInput value={searchQuery} onChange={setSearchQuery} />
+      </div>
+
       {/* Selected count */}
       {selected.size > 0 && (
         <div className="flex items-center gap-3 text-sm">
@@ -447,7 +507,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
             variant="outline"
             size="sm"
             className="h-7 text-xs"
-            onClick={() => toast.success(`Downloaded ${selected.size} files`)}
+            onClick={handleBulkDownload}
           >
             <Download className="mr-1 h-3 w-3" />
             Download
@@ -455,11 +515,8 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
           <Button
             variant="outline"
             size="sm"
-            className="h-7 text-xs text-destructive-foreground"
-            onClick={() => {
-              toast.success(`Deleted ${selected.size} files`)
-              setSelected(new Set())
-            }}
+            className="h-7 text-xs text-destructive hover:bg-destructive hover:text-destructive-foreground"
+            onClick={handleBulkDelete}
           >
             <Trash2 className="mr-1 h-3 w-3" />
             Delete
@@ -504,7 +561,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
                     data-state={selected.has(file.id) ? "selected" : undefined}
                     onClick={() =>
                       file.type === "folder"
-                        ? navigateToFolder({ id: file.id, name: file.name })
+                        ? navigateToFolder({ id: file.id, name: file.name, breadcrumbs: file.breadcrumbs })
                         : handleAction("Preview", file)
                     }
                   >
@@ -516,18 +573,29 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
                       />
                     </TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2.5 w-full text-left">
+                      <div className="flex items-center gap-2.5 w-full text-left min-w-0">
                         <Icon className={`h-4 w-4 shrink-0 ${color}`} />
-                        <span className="text-sm font-medium truncate">
+                        <span
+                          className="text-sm font-medium truncate shrink"
+                          title={file.name}
+                        >
                           {file.name}
                         </span>
+                        {searchQuery && file.path && (
+                          <span
+                            className="text-xs text-muted-foreground truncate shrink max-w-[200px] ml-2"
+                            title={file.path}
+                          >
+                            {file.path}
+                          </span>
+                        )}
                         {file.starred && (
-                          <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                          <Star className="h-3 w-3 fill-amber-400 text-amber-400 shrink-0" />
                         )}
                         {file.shared && (
                           <Badge
                             variant="secondary"
-                            className="text-[10px] px-1.5 py-0"
+                            className="text-[10px] px-1.5 py-0 shrink-0"
                           >
                             Shared
                           </Badge>
@@ -566,7 +634,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
                   }`}
                 onClick={() =>
                   file.type === "folder"
-                    ? navigateToFolder({ id: file.id, name: file.name })
+                    ? navigateToFolder({ id: file.id, name: file.name, breadcrumbs: file.breadcrumbs })
                     : toggleSelect(file.id)
                 }
               >

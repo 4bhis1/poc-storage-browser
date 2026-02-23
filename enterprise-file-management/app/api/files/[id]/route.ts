@@ -4,39 +4,12 @@ import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/token';
 import { S3Client, DeleteObjectCommand, CopyObjectCommand, ListObjectsV2Command, ListObjectsV2CommandOutput } from '@aws-sdk/client-s3';
 
-// ... inside DELETE function ...
-
-// Use a recursive function to delete S3 objects
-const deleteS3Objects = async (prefix: string) => {
-    let continuationToken: string | undefined = undefined;
-    do {
-        const listCommand = new ListObjectsV2Command({
-            Bucket: file.bucket.name,
-            Prefix: prefix,
-            ContinuationToken: continuationToken
-        });
-        const listRes: ListObjectsV2CommandOutput = await s3.send(listCommand);
-
-        if (listRes.Contents && listRes.Contents.length > 0) {
-            // Delete objects one by one or in batch (simple loop for now)
-            for (const obj of listRes.Contents) {
-                if (obj.Key) {
-                    await s3.send(new DeleteObjectCommand({
-                        Bucket: file.bucket.name,
-                        Key: obj.Key
-                    }));
-                }
-            }
-        }
-        continuationToken = listRes.NextContinuationToken;
-    } while (continuationToken);
-};
 import { decrypt } from '@/lib/encryption';
 import { checkPermission } from '@/lib/rbac';
 
 export async function DELETE(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const token = request.headers.get('Authorization')?.split(' ')[1];
@@ -54,7 +27,7 @@ export async function DELETE(
 
         if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-        const { id } = params;
+        const { id } = await params;
 
         const file = await prisma.fileObject.findUnique({
             where: { id },
@@ -143,7 +116,7 @@ export async function DELETE(
 
 export async function PATCH(
     request: NextRequest,
-    { params }: { params: { id: string } }
+    { params }: { params: Promise<{ id: string }> }
 ) {
     try {
         const token = request.headers.get('Authorization')?.split(' ')[1];
@@ -161,7 +134,7 @@ export async function PATCH(
 
         if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-        const { id } = params;
+        const { id } = await params;
         const body = await request.json();
         const { name } = body; // New name
 
