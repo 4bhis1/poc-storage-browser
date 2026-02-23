@@ -1,71 +1,68 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  selectFolder: () => ipcRenderer.invoke('select-folder'),
-  startSync: (folderPath) => ipcRenderer.invoke('start-sync', folderPath),
-  
-  onFileAdded: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('file-added', subscription);
-    return () => ipcRenderer.removeListener('file-added', subscription);
+  // 1. File Browser & Management
+  listContent: (args) => {
+    if (typeof args === 'string') {
+        return ipcRenderer.invoke('list-path-content', { folderPath: args });
+    }
+    return ipcRenderer.invoke('list-path-content', args);
   },
-  onFileChanged: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('file-changed', subscription);
-    return () => ipcRenderer.removeListener('file-changed', subscription);
-  },
-  onFileRemoved: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('file-removed', subscription);
-    return () => ipcRenderer.removeListener('file-removed', subscription);
-  },
-  onDirAdded: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('dir-added', subscription);
-    return () => ipcRenderer.removeListener('dir-added', subscription);
-  },
-  onDirRemoved: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('dir-removed', subscription);
-    return () => ipcRenderer.removeListener('dir-removed', subscription);
-  },
-  onError: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('sync-error', subscription);
-    return () => ipcRenderer.removeListener('sync-error', subscription);
-  },
-
-  listContent: (path) => ipcRenderer.invoke('list-path-content', path),
   createFolder: (path) => ipcRenderer.invoke('create-folder', path),
+  openFile: (path) => ipcRenderer.invoke('open-file', path),
   
-  onNetworkStats: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('network-stats', subscription);
-    return () => ipcRenderer.removeListener('network-stats', subscription);
-  },
-  onDiskStats: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('disk-stats', subscription);
-    return () => ipcRenderer.removeListener('disk-stats', subscription);
-  },
-
-  downloadFile: (url, targetPath) => ipcRenderer.invoke('download-file', { url, targetPath }),
-  onDownloadProgress: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('download-progress', subscription);
-    return () => ipcRenderer.removeListener('download-progress', subscription);
-  },
-  
-  handleFileDrop: (files, currentPath) => ipcRenderer.invoke('handle-file-drop', { files, currentPath }),
-  
-  syncS3: (folderPath) => ipcRenderer.invoke('sync-s3-to-local', folderPath),
-  onSyncProgress: (callback) => {
-    const subscription = (_event, value) => callback(value);
-    ipcRenderer.on('sync-progress', subscription);
-    return () => ipcRenderer.removeListener('sync-progress', subscription);
-  },
-  
+  // 2. Transfers
   selectFileForUpload: () => ipcRenderer.invoke('select-file'),
   selectFolderForUpload: () => ipcRenderer.invoke('select-folder-upload'),
-  uploadItems: (items, currentPath, shouldZip) => ipcRenderer.invoke('upload-items', { items, currentPath, shouldZip })
+  uploadItems: (items, currentPath, shouldZip) => ipcRenderer.invoke('upload-items', { items, currentPath, shouldZip }),
+  downloadFile: (url, targetPath) => ipcRenderer.invoke('download-file', { url, targetPath }),
+
+  // 2b. Get the real filesystem path from a File object (Electron 32+ replacement for File.prototype.path)
+  getFilePath: (file) => {
+    try {
+      return webUtils.getPathForFile(file);
+    } catch (e) {
+      console.error('[Preload] getFilePath error:', e.message);
+      return null;
+    }
+  },
+  
+  // 3. Status Tracking
+  getActiveTransfers: () => ipcRenderer.invoke('get-active-transfers'),
+  onTransferStatusUpdate: (callback) => {
+    const sub = (_, val) => callback(val);
+    ipcRenderer.on('transfer-status-update', sub);
+    return () => ipcRenderer.removeListener('transfer-status-update', sub);
+  },
+
+  // 4. Monitoring (Network/Disk)
+  onNetworkStats: (callback) => {
+    const sub = (_, val) => callback(val);
+    ipcRenderer.on('network-stats', sub);
+    return () => ipcRenderer.removeListener('network-stats', sub);
+  },
+  onDiskStats: (callback) => {
+    const sub = (_, val) => callback(val);
+    ipcRenderer.on('disk-stats', sub);
+    return () => ipcRenderer.removeListener('disk-stats', sub);
+  },
+
+  // 5. Sync Engine
+  initSync: (token) => ipcRenderer.invoke('init-sync', token),
+  stopSync: () => ipcRenderer.invoke('stop-sync'),
+  onAuthExpired: (callback) => {
+    const sub = () => callback();
+    ipcRenderer.on('auth-expired', sub);
+    return () => ipcRenderer.removeListener('auth-expired', sub);
+  },
+
+  // 6. DB Helpers
+  dbQuery: (text, params) => ipcRenderer.invoke('db-query', { text, params }),
+
+  // 7. Watcher Events
+  onFileChange: (event, callback) => {
+    const sub = (_, val) => callback(val);
+    ipcRenderer.on(`file-${event}`, sub);
+    return () => ipcRenderer.removeListener(`file-${event}`, sub);
+  }
 });

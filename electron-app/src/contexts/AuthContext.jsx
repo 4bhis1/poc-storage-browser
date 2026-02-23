@@ -1,31 +1,101 @@
-import React, { createContext, useContext, useState } from 'react';
+
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 const AuthContext = createContext();
 
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-    // Placeholder for future authentication logic
-    // Currently hardcoded as per the design mockup
-    const [user, setUser] = useState({
-        name: 'Admin User',
-        role: 'IT Operations',
-        avatar: null // Could be a URL
-    });
+    const [token, setToken] = useState(localStorage.getItem('accessToken'));
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const navigate = useNavigate();
 
-    const [tenant, setTenant] = useState({
-        id: 'tenant-123',
-        name: 'Enterprise_Corp',
-        plan: 'Premium'
-    });
+    useEffect(() => {
+        // Hydrate token
+        const storedToken = localStorage.getItem('accessToken');
+        if (storedToken) {
+            setToken(storedToken);
+            // In a real app, verify token validity here or decode JWT
+            // For now, we assume it's valid if present
+            if (window.electronAPI) {
+                 window.electronAPI.initSync(storedToken);
+            }
+        }
+        setLoading(false);
+
+        let cleanupAuthExpired = null;
+        if (window.electronAPI) {
+            cleanupAuthExpired = window.electronAPI.onAuthExpired(() => {
+                console.warn("Authentication expired in backend. Logging out...");
+                localStorage.removeItem('accessToken');
+                setToken(null);
+                setUser(null);
+                navigate('/login');
+            });
+        }
+
+        return () => {
+            if (cleanupAuthExpired) cleanupAuthExpired();
+        };
+    }, [navigate]);
+
+    const login = async (email, password) => {
+        try {
+            const response = await fetch('http://localhost:3000/api/auth/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email, password, platform: "Agent" })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Login failed');
+            }
+
+            const { accessToken, user: userData } = data;
+            
+            localStorage.setItem('accessToken', accessToken);
+            setToken(accessToken);
+            setUser(userData);
+            
+            // Initialize Sync Engine via IPC
+            if (window.electronAPI) {
+                window.electronAPI.initSync(accessToken);
+            }
+            
+            navigate('/');
+            return { success: true };
+        } catch (error) {
+            console.error(error);
+            return { success: false, error: error.message };
+        }
+    };
 
     const logout = () => {
-        console.log("Logout logic here");
+        localStorage.removeItem('accessToken');
+        setToken(null);
+        setUser(null);
+        if (window.electronAPI) {
+            window.electronAPI.stopSync();
+        }
+        navigate('/login');
+    };
+
+    const value = {
+        token,
+        user,
+        login,
+        logout,
+        isAuthenticated: !!token,
+        loading
     };
 
     return (
-        <AuthContext.Provider value={{ user, tenant, logout }}>
-            {children}
+        <AuthContext.Provider value={value}>
+            {!loading && children}
         </AuthContext.Provider>
     );
 };

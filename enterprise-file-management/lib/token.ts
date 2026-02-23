@@ -4,19 +4,25 @@ import { SignJWT, jwtVerify } from 'jose';
 const SECRET_KEY = process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || 'default-secret-key-change-it';
 const ENCODED_SECRET = new TextEncoder().encode(SECRET_KEY);
 
-export async function createAccessToken(payload: any) {
+export async function createAccessToken(payload: any, platform: string = "Web") {
+
+    const expTime = platform === "Agent" ? '15d' : '15m';
+
     return new SignJWT(payload)
         .setProtectedHeader({ alg: 'HS256' })
         .setIssuedAt()
-        .setExpirationTime('15m') // Short-lived
+        .setExpirationTime(expTime) // Short-lived
         .sign(ENCODED_SECRET);
 }
 
-export async function createRefreshToken(payload: any) {
+export async function createRefreshToken(payload: any, platform: string = "Web") {
+
+    const expTime = platform === "Agent" ? '15d' : '7d';
+
     return new SignJWT(payload)
         .setProtectedHeader({ alg: 'HS256' })
         .setIssuedAt()
-        .setExpirationTime('7d') // Long-lived
+        .setExpirationTime(expTime) // Long-lived
         .sign(ENCODED_SECRET);
 }
 

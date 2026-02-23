@@ -1,45 +1,75 @@
+import React, { useState, useEffect } from "react";
+import {
+  HashRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+  useSearchParams,
+} from "react-router-dom";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import TopBar from "./components/TopBar";
+import Sidebar from "./components/Sidebar";
+import TransferStatus from "./components/TransferStatus";
+import BucketsPage from "./pages/BucketsPage";
+import FilesPage from "./pages/FilesPage";
+import LoginPage from "./pages/LoginPage";
+import { SystemProvider } from "./contexts/SystemContext";
 
-import React, { useState, useEffect } from 'react';
-import TopBar from './components/TopBar';
-import FilesPage from './pages/FilesPage';
-import { SystemProvider } from './contexts/SystemContext';
-
-const AppContent = () => {
-    // Determine initial root path - strictly hardcoded or could be dynamic
-    // I will keep it for now.
-    const rootPath = '/home/abhishek/FMS';
-    const [currentPath, setCurrentPath] = useState(rootPath);
-
-    // If rootPath changes, reset currentPath (e.g. if we had a settings page to change it, but we removed it. 
-    // Keeping it simple).
-    
+const ProtectedRoute = ({ children }) => {
+  const { isAuthenticated, loading } = useAuth();
+  if (loading)
     return (
-        <div className="flex flex-col h-screen w-screen bg-white text-slate-900 font-sans selection:bg-blue-100 overflow-hidden">
-            {/* Top Navigation Bar with Stats & Breadcrumbs */}
-            <TopBar 
-                currentPath={currentPath} 
-                onNavigate={setCurrentPath} 
-                rootPath={rootPath} 
-            />
+      <div className="flex h-screen items-center justify-center">
+        Loading...
+      </div>
+    );
+  return isAuthenticated ? children : <Navigate to="/login" />;
+};
 
-            {/* Main Content Area */}
-            <div className="flex-1 overflow-hidden relative">
-                <FilesPage 
-                    currentPath={currentPath} 
-                    onNavigate={setCurrentPath}
-                    rootPath={rootPath}
-                />
-            </div>
+const Layout = () => {
+  return (
+    <div className="flex flex-col h-screen w-screen bg-slate-50 text-slate-900 font-sans overflow-hidden">
+      <TopBar />
+      <div className="flex-1 flex overflow-hidden">
+        <Sidebar />
+        <div className="flex-1 overflow-hidden relative bg-white sm:rounded-tl-2xl border border-slate-200 mr-3 mb-3">
+          <Routes>
+            <Route path="/" element={<BucketsPage />} />
+            <Route path="/files/:bucketId" element={<FilesPage />} />
+          </Routes>
         </div>
-    );
+      </div>
+      <TransferStatus />
+    </div>
+  );
 };
 
-const SidecarUI = () => {
-    return (
-        <SystemProvider>
-            <AppContent />
-        </SystemProvider>
-    );
+const Providers = ({ children }) => {
+  return (
+    <Router>
+      <AuthProvider>
+        <SystemProvider>{children}</SystemProvider>
+      </AuthProvider>
+    </Router>
+  );
 };
 
-export default SidecarUI;
+const App = () => {
+  return (
+    <Providers>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/*"
+          element={
+            <ProtectedRoute>
+              <Layout />
+            </ProtectedRoute>
+          }
+        />
+      </Routes>
+    </Providers>
+  );
+};
+
+export default App;

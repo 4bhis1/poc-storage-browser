@@ -134,7 +134,7 @@ export async function GET(request: NextRequest) {
 // Creates a bucket on AWS S3 under the user-selected account, then saves
 // the record to the DB. If S3 creation fails the DB row is rolled back.
 //
-// Required body: { name: string, region: string, accountId: string, encryption?: boolean }
+// Required body: { name: string, region: string, accountId: string, encryption?: boolean, isImport?: boolean }
 export async function POST(request: NextRequest) {
     try {
         const token = request.headers.get('Authorization')?.split(' ')[1];
@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { name, region, accountId, encryption } = body;
+        const { name, region, accountId, encryption, isImport } = body;
 
         // Validate required fields
         if (!name || !region || !accountId) {
@@ -210,10 +210,10 @@ export async function POST(request: NextRequest) {
             },
         });
 
-        // ── Step 2: Create the real S3 bucket ─────────────────────────────
+        // ── Step 2: Create or verify the S3 bucket ─────────────────────────────
         try {
             const { decrypt } = await import('@/lib/encryption');
-            const { S3Client, CreateBucketCommand, PutBucketEncryptionCommand, DeleteBucketCommand, PutBucketCorsCommand } = await import('@aws-sdk/client-s3');
+            const { S3Client, CreateBucketCommand, PutBucketEncryptionCommand, DeleteBucketCommand, PutBucketCorsCommand, HeadBucketCommand } = await import('@aws-sdk/client-s3');
 
             const s3 = new S3Client({
                 region,
@@ -223,62 +223,104 @@ export async function POST(request: NextRequest) {
                 },
             });
 
-            // AWS does NOT allow a LocationConstraint for us-east-1 (it's the default)
-            const input: any = { Bucket: name };
-            if (region !== 'us-east-1') {
-                input.CreateBucketConfiguration = { LocationConstraint: region };
-            }
-
-            await s3.send(new CreateBucketCommand(input));
-
-            try {
-                // Apply encryption if requested
-                if (encryption) {
-                    await s3.send(new PutBucketEncryptionCommand({
-                        Bucket: name,
-                        ServerSideEncryptionConfiguration: {
-                            Rules: [
-                                {
-                                    ApplyServerSideEncryptionByDefault: {
-                                        SSEAlgorithm: 'AES256'
-                                    }
-                                }
-                            ]
-                        }
-                    }));
+            if (isImport) {
+                // Determine if we can access the existing bucket
+                await s3.send(new HeadBucketCommand({ Bucket: name }));
+            } else {
+                // AWS does NOT allow a LocationConstraint for us-east-1 (it's the default)
+                const input: any = { Bucket: name };
+                if (region !== 'us-east-1') {
+                    input.CreateBucketConfiguration = { LocationConstraint: region };
                 }
 
-                // Apply CORS configuration
-                const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-                if (allowedOrigins.length > 0) {
-                    await s3.send(new PutBucketCorsCommand({
-                        Bucket: name,
-                        CORSConfiguration: {
-                            CORSRules: [
-                                {
-                                    AllowedHeaders: ["*"],
-                                    AllowedMethods: ["PUT", "POST", "GET", "HEAD"],
-                                    AllowedOrigins: allowedOrigins,
-                                    ExposeHeaders: ["ETag"],
-                                    MaxAgeSeconds: 3000
-                                }
-                            ]
-                        }
-                    }));
-                }
-            } catch (configError) {
-                console.error('Failed to configure bucket, rolling back S3 creation:', configError);
-                // Attempt to delete the bucket we just created
+                await s3.send(new CreateBucketCommand(input));
+
                 try {
-                    await s3.send(new DeleteBucketCommand({ Bucket: name }));
-                } catch (cleanupError) {
-                    console.error('Failed to cleanup S3 bucket after configuration error:', cleanupError);
+                    // Apply encryption if requested
+                    if (encryption) {
+                        await s3.send(new PutBucketEncryptionCommand({
+                            Bucket: name,
+                            ServerSideEncryptionConfiguration: {
+                                Rules: [
+                                    {
+                                        ApplyServerSideEncryptionByDefault: {
+                                            SSEAlgorithm: 'AES256'
+                                        }
+                                    }
+                                ]
+                            }
+                        }));
+                    }
+
+                    // Apply CORS configuration
+                    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+                    if (allowedOrigins.length > 0) {
+                        await s3.send(new PutBucketCorsCommand({
+                            Bucket: name,
+                            CORSConfiguration: {
+                                CORSRules: [
+                                    {
+                                        AllowedHeaders: ["*"],
+                                        AllowedMethods: ["PUT", "POST", "GET", "HEAD"],
+                                        AllowedOrigins: allowedOrigins,
+                                        ExposeHeaders: ["ETag"],
+                                        MaxAgeSeconds: 3000
+                                    }
+                                ]
+                            }
+                        }));
+                    }
+                } catch (configError) {
+                    console.error('Failed to configure bucket, rolling back S3 creation:', configError);
+                    // Attempt to delete the bucket we just created
+                    try {
+                        await s3.send(new DeleteBucketCommand({ Bucket: name }));
+                    } catch (cleanupError) {
+                        console.error('Failed to cleanup S3 bucket after configuration error:', cleanupError);
+                    }
+                    throw configError; // Re-throw to trigger DB rollback below
                 }
-                throw configError; // Re-throw to trigger DB rollback below
             }
         } catch (s3Error: any) {
             // Roll back the DB row so we don't have a phantom bucket record
             await prisma.bucket.delete({ where: { id: bucket.id } });
+
+            console.error('S3 Bucket operation failed:', s3Error);
+
+            if (isImport) {
+                const statusCode = s3Error.$metadata?.httpStatusCode;
+                if (s3Error.name === 'NotFound' || statusCode === 404) {
+                    return NextResponse.json(
+                        { error: `Bucket "${name}" does not exist in S3. Cannot map.` },
+                        { status: 404 }
+                    );
+                }
+                if (s3Error.name === 'Forbidden' || statusCode === 403) {
+                    return NextResponse.json(
+                        { error: `Access denied to bucket "${name}". Check your AWS credentials and IAM permissions.` },
+                        { status: 403 }
+                    );
+                }
+                if (statusCode === 301) {
+                    return NextResponse.json(
+                        { error: `Bucket "${name}" exists but is located in a different region. Please select the correct region.` },
+                        { status: 400 }
+                    );
+                }
+                if (s3Error.name === 'UnknownError') {
+                    if (statusCode) {
+                        return NextResponse.json(
+                            { error: `AWS S3 operation failed with status code ${statusCode}. Please check bucket name and permissions.` },
+                            { status: statusCode }
+                        );
+                    } else {
+                        return NextResponse.json(
+                            { error: `Cannot reach AWS S3. Please verify your credentials, region, and network connection.` },
+                            { status: 500 }
+                        );
+                    }
+                }
+            }
 
             console.error('S3 CreateBucket failed:', s3Error);
 

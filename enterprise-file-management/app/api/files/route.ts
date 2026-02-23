@@ -10,12 +10,13 @@ export async function GET(request: NextRequest) {
         const searchParams = request.nextUrl.searchParams;
         const bucketId = searchParams.get('bucketId');
         const parentId = searchParams.get('parentId');
+        const syncAll = searchParams.get('syncAll') === 'true';
 
         const where: any = {};
         if (bucketId) where.bucketId = bucketId;
         if (parentId) {
             where.parentId = parentId;
-        } else if (bucketId) {
+        } else if (bucketId && !syncAll) {
             where.parentId = null;
         }
 
@@ -36,7 +37,15 @@ export async function GET(request: NextRequest) {
             owner: 'Admin',
             shared: false,
             starred: false,
-            children: f.children.map(c => ({ id: c.id }))
+            children: f.children.map(c => ({ id: c.id })),
+            // Fields needed for SyncEngine in Electron
+            key: f.key,
+            isFolder: f.isFolder,
+            mimeType: f.mimeType,
+            bucketId: f.bucketId,
+            parentId: f.parentId,
+            createdAt: f.createdAt,
+            updatedAt: f.updatedAt
         }));
 
         return NextResponse.json(fileItems);
