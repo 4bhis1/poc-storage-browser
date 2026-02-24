@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     // Authz: Only Tenant Admin (of same tenant) or Platform Admin
     // @ts-ignore
-    const requester = await prisma.user.findUnique({ where: { id: payload.id as string } });
+    const requester = await prisma.user.findUnique({ where: { email: payload.email as string } });
     if (!requester) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
     const targetUser = await prisma.user.findUnique({ where: { id: targetUserId } });
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
     if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // @ts-ignore
-    const requester = await prisma.user.findUnique({ where: { id: payload.id as string } });
+    const requester = await prisma.user.findUnique({ where: { email: payload.email as string } });
 
     const data = await request.json();
     const { userId, resourceType, resourceId, actions } = data;
@@ -100,7 +100,7 @@ export async function DELETE(request: NextRequest) {
     if (!policy) return NextResponse.json({ error: 'Policy not found' }, { status: 404 });
 
     // @ts-ignore
-    const requester = await prisma.user.findUnique({ where: { id: payload.id } });
+    const requester = await prisma.user.findUnique({ where: { email: payload.email as string } });
 
     if (requester?.role === Role.PLATFORM_ADMIN) {
         // Allow

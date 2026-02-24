@@ -21,13 +21,17 @@ export function generateSecretHash(userName: string): string {
   return crypto.createHmac('sha256', CLIENT_SECRET).update(userName + CLIENT_ID).digest('base64');
 }
 
-export async function inviteUserToCognito(email: string, tenantId?: string, role: string = 'TEAMMATE') {
+export async function inviteUserToCognito(email: string, tenantId?: string, role: string = 'TEAMMATE', name?: string) {
   try {
     const userAttributes = [
       { Name: 'email', Value: email },
       { Name: 'email_verified', Value: 'true' },
       { Name: 'custom:role', Value: role },
     ];
+
+    if (name) {
+      userAttributes.push({ Name: 'name', Value: name });
+    }
 
     if (tenantId) {
       userAttributes.push({ Name: 'custom:tenantId', Value: tenantId });

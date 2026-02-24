@@ -16,6 +16,8 @@ import {
   Shield,
   User,
   Users,
+  Share2,
+  FileText
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -44,12 +46,6 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { useAuth } from "@/components/providers/AuthProvider";
 
-const mainNav = [
-  { title: "Overview", icon: LayoutDashboard, href: "/" },
-  { title: "Buckets", icon: HardDrive, href: "/buckets" },
-  // { title: "Search", icon: Search, href: "/search" },
-];
-
 const platformAdminNav = [
   { title: "Overview", icon: LayoutDashboard, href: "/" },
   { title: "Tenants", icon: Building, href: "/tenants" },
@@ -58,12 +54,12 @@ const platformAdminNav = [
 ];
 
 const tenantNav = [
+  { title: "Dashboard", icon: LayoutDashboard, href: "/" },
   { title: "Buckets", icon: HardDrive, href: "/buckets" },
-  { title: "Users", icon: Users, href: "/teammates" },
-];
-
-const managementNav = [
-  { title: "Audit & Costs", icon: CreditCard, href: "/audit" },
+  { title: "Files", icon: FolderOpen, href: "/files" },
+  { title: "Shares", icon: Share2, href: "/shares" },
+  { title: "Audit", icon: FileText, href: "/audit" },
+  { title: "Teams and Roles", icon: Users, href: "/teams" },
   { title: "Settings", icon: Settings, href: "/settings" },
 ];
 
@@ -71,11 +67,9 @@ export function AppSidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
 
-  let navItems = mainNav;
+  let navItems = tenantNav;
   if (user?.role === "PLATFORM_ADMIN") {
     navItems = platformAdminNav;
-  } else if (user?.role === "TENANT_ADMIN" || user?.role === "TEAMMATE") {
-    navItems = tenantNav;
   }
 
   if (!user) return null;
@@ -118,66 +112,25 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Platform</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={
-                      item.href === "/"
-                        ? pathname === "/"
-                        : pathname.startsWith(item.href)
-                    }
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {navItems.map((item) => {
+                const isActive = item.href === "/" 
+                    ? pathname === "/" 
+                    : pathname.startsWith(item.href);
+                    
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive}>
+                      <Link href={item.href}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Management</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {managementNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname.startsWith(item.href)}
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Storage</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <div className="px-3 py-2">
-              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-                <span>Used</span>
-                <span>1.2 TB / 1.7 TB</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: "71%" }}
-                />
-              </div>
-            </div>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
@@ -248,3 +201,4 @@ export function AppSidebar() {
     </Sidebar>
   );
 }
+

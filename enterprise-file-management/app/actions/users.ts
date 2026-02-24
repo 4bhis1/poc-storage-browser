@@ -46,7 +46,7 @@ export async function inviteUser(formData: FormData) {
         }
 
         // Invite User to Cognito (sends magic link/temp password)
-        await inviteUserToCognito(email, tenantId, role)
+        await inviteUserToCognito(email, tenantId, role, name)
 
         // Save user in database 
         await prisma.user.create({

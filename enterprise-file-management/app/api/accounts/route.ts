@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
         if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
         // @ts-ignore
-        const user = await prisma.user.findUnique({ where: { id: payload.id as string } });
+        const user = await prisma.user.findUnique({ where: { email: payload.email as string } });
         if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
         // PLATFORM_ADMIN sees all; everyone else is scoped to their own tenant
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
         if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
         // @ts-ignore
-        const user = await prisma.user.findUnique({ where: { id: payload.id as string } });
+        const user = await prisma.user.findUnique({ where: { email: payload.email as string } });
         if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
         if (user.role !== Role.PLATFORM_ADMIN && user.role !== Role.TENANT_ADMIN) {

@@ -73,7 +73,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
             let continuationToken: string | undefined = undefined;
 
             do {
-                const objectsData = await s3.send(new ListObjectsV2Command({
+                const objectsData: any = await s3.send(new ListObjectsV2Command({
                     Bucket: s3Bucket.Name,
                     ContinuationToken: continuationToken
                 }));
@@ -110,7 +110,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
                             // but for sync serialized loop it's "ok" slow but safe.
                             // Optimization: Cache known paths in memory map during sync.
 
-                            const existingFolder = await prisma.fileObject.findFirst({
+                            const existingFolder: any = await prisma.fileObject.findFirst({
                                 where: {
                                     name: folderName,
                                     bucketId: dbBucket.id,
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
                             if (existingFolder) {
                                 parentId = existingFolder.id;
                             } else {
-                                const newFolder = await prisma.fileObject.create({
+                                const newFolder: any = await prisma.fileObject.create({
                                     data: {
                                         name: folderName,
                                         key: folderPath.slice(0, i + 1).join('/') + '/',

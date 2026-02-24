@@ -21,14 +21,14 @@ export async function POST(request: Request) {
     }
     
     try {
-        const { email, role } = await request.json();
+        const { email, role, name } = await request.json();
         
         // Invite to Cognito explicitly
-        await inviteUserToCognito(email, undefined, role || 'TEAMMATE');
+        await inviteUserToCognito(email, undefined, role || 'TEAMMATE', name);
         
         // Log in Postgres
         const newUser = await prisma.user.create({
-            data: { email, role: role || 'TEAMMATE' }
+            data: { email, name, role: role || 'TEAMMATE' }
         });
 
         return NextResponse.json(newUser);

@@ -11,8 +11,13 @@ export async function POST(request: NextRequest) {
         }
 
         let authResponse;
+        
+        const cleanEmail = email.trim();
+        const cleanPassword = newPassword.trim();
+        const cleanSession = session.trim();
+
         try {
-            authResponse = await respondToNewPasswordChallenge(email, newPassword, session);
+            authResponse = await respondToNewPasswordChallenge(cleanEmail, cleanPassword, cleanSession);
         } catch (error: any) {
             return NextResponse.json({ error: error.message || 'Failed to update password' }, { status: 400 });
         }
@@ -23,15 +28,15 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid response from Cognito after password update' }, { status: 500 });
         }
 
-        const defaultRole = email.toLowerCase() === 'admin@fms.com' ? 'PLATFORM_ADMIN' : 'TEAMMATE';
+        const defaultRole = cleanEmail.toLowerCase() === 'admin@fms.com' ? 'PLATFORM_ADMIN' : 'TEAMMATE';
         
         let user;
         try {
             user = await prisma.user.upsert({
-                where: { email },
+                where: { email: cleanEmail },
                 update: {},
                 create: {
-                    email,
+                    email: cleanEmail,
                     role: defaultRole as any,
                 }
             });

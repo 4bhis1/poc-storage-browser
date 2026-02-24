@@ -19,7 +19,7 @@ export async function GET(request: NextRequest) {
 
         // @ts-ignore
         const user = await prisma.user.findUnique({
-            where: { id: payload.id as string },
+            where: { email: payload.email as string },
             include: { policies: true }
         });
 

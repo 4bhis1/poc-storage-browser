@@ -12,8 +12,12 @@ export async function POST(request: NextRequest) {
 
         let authResult;
         let initiateAuthResponse;
+        
+        const cleanEmail = email.trim();
+        const cleanPassword = password.trim();
+
         try {
-            initiateAuthResponse = await authenticateCognitoUser(email, password);
+            initiateAuthResponse = await authenticateCognitoUser(cleanEmail, cleanPassword);
         } catch (error: any) {
             return NextResponse.json({ error: error.message || 'Invalid credentials' }, { status: 401 });
         }
@@ -32,15 +36,15 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Invalid response from Cognito' }, { status: 500 });
         }
 
-        const defaultRole = email.toLowerCase() === 'admin@fms.com' ? 'PLATFORM_ADMIN' : 'TEAMMATE';
+        const defaultRole = cleanEmail.toLowerCase() === 'admin@fms.com' ? 'PLATFORM_ADMIN' : 'TEAMMATE';
         
         let user;
         try {
             user = await prisma.user.upsert({
-                where: { email },
+                where: { email: cleanEmail },
                 update: {},
                 create: {
-                    email,
+                    email: cleanEmail,
                     role: defaultRole as any,
                 }
             });
