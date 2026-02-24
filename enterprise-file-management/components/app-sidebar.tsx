@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import {
   AudioWaveform,
@@ -16,10 +16,12 @@ import {
   Shield,
   User,
   Users,
-} from "lucide-react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+  Share2,
+  FileText
+} from "lucide-react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,7 +29,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@/components/ui/dropdown-menu";
 import {
   Sidebar,
   SidebarContent,
@@ -40,39 +42,37 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-} from "@/components/ui/sidebar"
-import { ThemeToggle } from "@/components/theme-toggle"
-import { useAuth } from "@/components/providers/AuthProvider"
+} from "@/components/ui/sidebar";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { useAuth } from "@/components/providers/AuthProvider";
 
-const mainNav = [
+const platformAdminNav = [
   { title: "Overview", icon: LayoutDashboard, href: "/" },
+  { title: "Tenants", icon: Building, href: "/tenants" },
+  { title: "Manage Users", icon: Users, href: "/users" },
   { title: "Buckets", icon: HardDrive, href: "/buckets" },
-  // { title: "Search", icon: Search, href: "/search" },
-]
+];
 
 const tenantNav = [
-  ...mainNav,
-  { title: "AWS Accounts", icon: Cloud, href: "/accounts" },
-  { title: "Teammates", icon: Users, href: "/teammates" },
-]
-
-const managementNav = [
-  { title: "Audit & Costs", icon: CreditCard, href: "/audit" },
+  { title: "Dashboard", icon: LayoutDashboard, href: "/" },
+  { title: "Buckets", icon: HardDrive, href: "/buckets" },
+  { title: "Files", icon: FolderOpen, href: "/files" },
+  { title: "Shares", icon: Share2, href: "/shares" },
+  { title: "Audit", icon: FileText, href: "/audit" },
+  { title: "Teams and Roles", icon: Users, href: "/teams" },
   { title: "Settings", icon: Settings, href: "/settings" },
-]
+];
 
 export function AppSidebar() {
-  const pathname = usePathname()
-  const { user, logout } = useAuth()
+  const pathname = usePathname();
+  const { user, logout } = useAuth();
 
-  let navItems = mainNav;
-  if (user?.role === 'PLATFORM_ADMIN') {
-    navItems = [...mainNav, { title: "Tenants", icon: Building, href: "/tenants" }]
-  } else if (user?.role === 'TENANT_ADMIN') {
-    navItems = tenantNav
+  let navItems = tenantNav;
+  if (user?.role === "PLATFORM_ADMIN") {
+    navItems = platformAdminNav;
   }
 
-  if (!user) return null
+  if (!user) return null;
 
   return (
     <Sidebar variant="inset">
@@ -88,7 +88,7 @@ export function AppSidebar() {
                   <div className="flex flex-col gap-0.5 leading-none">
                     <span className="font-semibold">CloudVault</span>
                     <span className="text-xs text-muted-foreground">
-                      {user.tenantName || 'Enterprise'}
+                      {user.tenantName || "Enterprise"}
                     </span>
                   </div>
                   <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground" />
@@ -102,7 +102,7 @@ export function AppSidebar() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem>
                   <Cloud className="mr-2 h-4 w-4" />
-                  {user.tenantName || 'Enterprise'}
+                  {user.tenantName || "Enterprise"}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -112,66 +112,25 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Platform</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={
-                      item.href === "/"
-                        ? pathname === "/"
-                        : pathname.startsWith(item.href)
-                    }
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
+              {navItems.map((item) => {
+                const isActive = item.href === "/" 
+                    ? pathname === "/" 
+                    : pathname.startsWith(item.href);
+                    
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton asChild isActive={isActive}>
+                      <Link href={item.href}>
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
             </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Management</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {managementNav.map((item) => (
-                <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton
-                    asChild
-                    isActive={pathname.startsWith(item.href)}
-                  >
-                    <Link href={item.href}>
-                      <item.icon className="h-4 w-4" />
-                      <span>{item.title}</span>
-                    </Link>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        <SidebarGroup>
-          <SidebarGroupLabel>Storage</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <div className="px-3 py-2">
-              <div className="flex items-center justify-between text-xs text-muted-foreground mb-1.5">
-                <span>Used</span>
-                <span>1.2 TB / 1.7 TB</span>
-              </div>
-              <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: "71%" }}
-                />
-              </div>
-            </div>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
@@ -184,7 +143,7 @@ export function AppSidebar() {
                 <SidebarMenuButton size="lg" className="w-full">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                      {user.name?.substring(0, 2).toUpperCase() || 'U'}
+                      {user.name?.substring(0, 2).toUpperCase() || "U"}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col gap-0.5 leading-none">
@@ -195,15 +154,11 @@ export function AppSidebar() {
                   </div>
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
-              <DropdownMenuContent
-                className="w-56"
-                align="start"
-                side="top"
-              >
+              <DropdownMenuContent className="w-56" align="start" side="top">
                 <DropdownMenuLabel className="flex items-center gap-2">
                   <Avatar className="h-8 w-8">
                     <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                      {user.name?.substring(0, 2).toUpperCase() || 'U'}
+                      {user.name?.substring(0, 2).toUpperCase() || "U"}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex flex-col">
@@ -244,5 +199,6 @@ export function AppSidebar() {
 
       <SidebarRail />
     </Sidebar>
-  )
+  );
 }
+

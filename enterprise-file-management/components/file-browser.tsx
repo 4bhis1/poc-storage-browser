@@ -114,6 +114,7 @@ interface FileBrowserProps {
 
 import { usePermission } from "@/lib/hooks/usePermission";
 import { fetchWithAuth } from "@/lib/api";
+import { getAuthHeader } from "@/lib/token";
 import { SearchInput } from "./search-input";
 import { useDownload } from "@/components/providers/download-provider";
 

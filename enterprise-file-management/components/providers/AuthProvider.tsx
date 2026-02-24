@@ -63,53 +63,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     useEffect(() => {
         async function initAuth() {
             const storedToken = localStorage.getItem('accessToken');
+            const storedUser = localStorage.getItem('user');
 
-            if (storedToken) {
+            if (storedToken && storedUser) {
                 try {
                     const decoded: any = jwtDecode(storedToken);
                     const isExpired = decoded.exp * 1000 < Date.now();
 
                     if (!isExpired) {
-                        // Token is still valid — restore user from storage
-                        const storedUser = localStorage.getItem('user');
-                        if (storedUser) {
-                            setUser(JSON.parse(storedUser));
+                        setUser(JSON.parse(storedUser));
 
-                            // Schedule a proactive refresh ~1 minute before expiry
-                            const msUntilExpiry = decoded.exp * 1000 - Date.now();
-                            const refreshIn = Math.max(msUntilExpiry - 60_000, 0);
-                            const timer = setTimeout(async () => {
-                                const newToken = await tryRefresh();
-                                if (newToken) {
-                                    localStorage.setItem('accessToken', newToken);
-                                } else {
-                                    await logout();
-                                }
-                            }, refreshIn);
-                            setLoading(false);
-                            return () => clearTimeout(timer);
-                        }
+                        // Schedule a proactive refresh ~1 minute before expiry
+                        const msUntilExpiry = decoded.exp * 1000 - Date.now();
+                        const refreshIn = Math.max(msUntilExpiry - 60_000, 0);
+                        const timer = setTimeout(async () => {
+                            const newToken = await tryRefresh();
+                            if (newToken) {
+                                localStorage.setItem('accessToken', newToken);
+                            } else {
+                                await logout();
+                            }
+                        }, refreshIn);
+                        setLoading(false);
+                        return () => clearTimeout(timer);
                     }
 
-                    // Token expired — try refresh using the httpOnly refreshToken cookie
+                    // Token expired — try refresh
                     const newToken = await tryRefresh();
                     if (newToken) {
                         localStorage.setItem('accessToken', newToken);
-                        const decoded2: any = jwtDecode(newToken);
-                        const storedUser = localStorage.getItem('user');
-                        if (storedUser) {
-                            setUser(JSON.parse(storedUser));
-                        } else {
-                            setUser({
-                                id: decoded2.id,
-                                email: decoded2.email,
-                                name: decoded2.name,
-                                role: decoded2.role,
-                                tenantId: decoded2.tenantId,
-                            });
-                        }
+                        setUser(JSON.parse(storedUser));
                     } else {
-                        // Refresh failed — clear everything and redirect to login
                         localStorage.removeItem('accessToken');
                         localStorage.removeItem('user');
                         router.push('/login');
@@ -123,8 +107,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                         router.push('/login');
                     }
                 }
+            } else {
+                // No localStorage — check if server httpOnly cookie still has a valid session
+                try {
+                    const res = await fetch('/api/auth/me');
+                    if (res.ok) {
+                        const userData = await res.json();
+                        // Hydrate user from server — don't set localStorage here
+                        // (login page will do that on next explicit login)
+                        setUser(userData);
+                    }
+                    // If 401, user is simply not logged in — stay null, proxy will redirect
+                } catch { /* network error — stay null */ }
             }
-            // No token in localStorage — no action needed; middleware will guard protected routes
+
             setLoading(false);
         }
 

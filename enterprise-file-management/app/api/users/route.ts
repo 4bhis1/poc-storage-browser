@@ -2,23 +2,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { checkPermission } from '@/lib/rbac';
-import { verifyToken } from '@/lib/token';
+import { getCurrentUser } from '@/lib/session';
 import { hashPassword } from '@/lib/auth';
 import { Role } from '@/lib/generated/prisma/client';
 
 export async function GET(request: NextRequest) {
-    const token = request.headers.get('Authorization')?.split(' ')[1];
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const user = await prisma.user.findUnique({
-        where: { id: payload.id as string },
-        include: { policies: true }
-    });
-
-    if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     // Check if user is allowed to list users (Tenant Admin or Platform Admin)
     // We can define a simplified resource context for "Tenant" management
@@ -51,16 +41,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
-    const token = request.headers.get('Authorization')?.split(' ')[1];
-    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    const payload = await verifyToken(token);
-    // @ts-ignore
-    if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-    // @ts-ignore
-    const requester = await prisma.user.findUnique({ where: { id: payload.id as string }, include: { policies: true } });
-    if (!requester) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    const requester = await getCurrentUser();
+    if (!requester) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const data = await request.json();
 

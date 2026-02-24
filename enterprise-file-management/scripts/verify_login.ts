@@ -31,7 +31,7 @@ async function main() {
 
         // 2. Verify Password
         console.log(`\nVerifying password: '${password}'...`);
-        const isValid = await bcrypt.compare(password, user.password);
+        const isValid = await bcrypt.compare(password, user.password || '');
 
         if (isValid) {
             console.log("✅ Password verification SUCCESSFUL!");

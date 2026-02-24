@@ -89,7 +89,11 @@ const storageByBucket = mockBuckets.map((b) => ({
   size: b.totalSize / 1_000_000_000,
 }))
 
+import { useAuth } from "@/components/providers/AuthProvider"
+
 export default function OverviewPage() {
+  const { user } = useAuth()
+
   return (
     <>
       <SearchCommandDialog />
@@ -99,7 +103,14 @@ export default function OverviewPage() {
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbPage>Overview</BreadcrumbPage>
+              <BreadcrumbPage className="flex items-center gap-2">
+                Overview
+                {user?.role && (
+                  <Badge variant="outline" className="text-xs bg-primary/10 text-primary border-primary/20">
+                    {user.role}
+                  </Badge>
+                )}
+              </BreadcrumbPage>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>

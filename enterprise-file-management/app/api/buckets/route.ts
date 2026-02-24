@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
-import { verifyToken } from '@/lib/token';
+import { getCurrentUser } from '@/lib/session';
 import { Role } from '@/lib/generated/prisma/client';
 
 // ─── GET /api/buckets ──────────────────────────────────────────────────────
@@ -9,19 +9,8 @@ import { Role } from '@/lib/generated/prisma/client';
 // TEAMMATE sees only buckets they have policy access to.
 export async function GET(request: NextRequest) {
     try {
-        const token = request.headers.get('Authorization')?.split(' ')[1];
-        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-        const payload = await verifyToken(token);
-        // @ts-ignore
-        if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-        // @ts-ignore
-        const user = await prisma.user.findUnique({
-            where: { id: payload.id as string },
-            include: { policies: true },
-        });
-        if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+        const user = await getCurrentUser();
+        if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
         // Parse query params
         const { searchParams } = new URL(request.url);
@@ -137,16 +126,8 @@ export async function GET(request: NextRequest) {
 // Required body: { name: string, region: string, accountId: string, encryption?: boolean, isImport?: boolean }
 export async function POST(request: NextRequest) {
     try {
-        const token = request.headers.get('Authorization')?.split(' ')[1];
-        if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-        const payload = await verifyToken(token);
-        // @ts-ignore
-        if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-
-        // @ts-ignore
-        const user = await prisma.user.findUnique({ where: { id: payload.id as string } });
-        if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
+        const user = await getCurrentUser();
+        if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
         // Only admins can create buckets
         if (user.role !== Role.PLATFORM_ADMIN && user.role !== Role.TENANT_ADMIN) {
@@ -154,46 +135,61 @@ export async function POST(request: NextRequest) {
         }
 
         const body = await request.json();
-        const { name, region, accountId, encryption, isImport } = body;
+        const { name, region, encryption, isExisting } = body;
 
         // Validate required fields
-        if (!name || !region || !accountId) {
+        if (!name || (!region && !isExisting)) {
             return NextResponse.json(
-                { error: 'name, region, and accountId are all required' },
+                { error: 'Name and region are required' },
                 { status: 400 }
             );
         }
 
-        // Look up the chosen account — must belong to the user's tenant (security check)
-        const account = await prisma.account.findFirst({
+        // Look up an existing account for the user's tenant
+        let account = await prisma.account.findFirst({
             where: {
-                id: accountId,
                 tenantId: user.tenantId as string,
             },
+            include: { tenant: true }
         });
 
         if (!account) {
-            return NextResponse.json(
-                { error: 'The selected AWS account was not found or does not belong to your tenant' },
-                { status: 404 }
-            );
+            // Create a default system account if one doesn't exist for this tenant
+            const tenant = await prisma.tenant.findUnique({ where: { id: user.tenantId as string }});
+            if (!tenant) return NextResponse.json({ error: 'Tenant not found' }, { status: 404 });
+
+            account = await prisma.account.create({
+                data: {
+                    name: 'System Default Account',
+                    tenantId: tenant.id
+                },
+                include: { tenant: true }
+            });
         }
 
-        if (!account.awsAccessKeyId || !account.awsSecretAccessKey) {
+        if (!process.env.AWS_PROFILE && (!account.awsAccessKeyId || !account.awsSecretAccessKey)) {
             return NextResponse.json(
-                { error: `AWS credentials are not configured for account "${account.name}". Please add them in Settings.` },
+                { error: `AWS profile environment variable is not configured, and account "${account.name}" has no credentials. Please configure AWS_PROFILE or add credentials.` },
                 { status: 422 }
             );
         }
 
-        // Check for existing bucket in DB to prevent duplicates
+        const rawTenantName = account.tenant.name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const rawBucketSuffix = name.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+        const finalBucketName = isExisting ? name : `fms-${rawTenantName}-bucket-${rawBucketSuffix}`;
+
         const existingBucket = await prisma.bucket.findFirst({
-            where: { name }
+            where: { name: finalBucketName },
+            include: { account: true }
         });
 
         if (existingBucket) {
+            const isSameTenant = existingBucket.account?.tenantId === user.tenantId;
             return NextResponse.json(
-                { error: `Bucket "${name}" is already tracked in your system. Please use a different name.` },
+                { error: isSameTenant ? 
+                  `Bucket "${finalBucketName}" is already mapped in your tenant. You should see it in your Buckets list.` :
+                  `Bucket "${finalBucketName}" is already tracked by another tenant in the system. Please use a different name.` 
+                },
                 { status: 409 }
             );
         }
@@ -201,7 +197,7 @@ export async function POST(request: NextRequest) {
         // ── Step 1: Save record to DB ──────────────────────────────────────
         const bucket = await prisma.bucket.create({
             data: {
-                name,
+                name: finalBucketName,
                 region,
                 accountId: account.id,
                 encryption: !!encryption,
@@ -214,21 +210,26 @@ export async function POST(request: NextRequest) {
         try {
             const { decrypt } = await import('@/lib/encryption');
             const { S3Client, CreateBucketCommand, PutBucketEncryptionCommand, DeleteBucketCommand, PutBucketCorsCommand, HeadBucketCommand } = await import('@aws-sdk/client-s3');
-
-            const s3 = new S3Client({
-                region,
-                credentials: {
+            
+            let s3ClientConfig: any = { region };
+            if (account.awsAccessKeyId && account.awsSecretAccessKey) {
+                s3ClientConfig.credentials = {
                     accessKeyId: decrypt(account.awsAccessKeyId),
                     secretAccessKey: decrypt(account.awsSecretAccessKey),
-                },
-            });
+                };
+            } else if (process.env.AWS_PROFILE) {
+                const { fromIni } = await import('@aws-sdk/credential-providers');
+                s3ClientConfig.credentials = fromIni({ profile: process.env.AWS_PROFILE });
+            }
 
-            if (isImport) {
-                // Determine if we can access the existing bucket
-                await s3.send(new HeadBucketCommand({ Bucket: name }));
+            const s3 = new S3Client(s3ClientConfig);
+
+            if (isExisting) {
+                // Verify the bucket exists and we have access
+                await s3.send(new HeadBucketCommand({ Bucket: finalBucketName }));
             } else {
                 // AWS does NOT allow a LocationConstraint for us-east-1 (it's the default)
-                const input: any = { Bucket: name };
+                const input: any = { Bucket: finalBucketName };
                 if (region !== 'us-east-1') {
                     input.CreateBucketConfiguration = { LocationConstraint: region };
                 }
@@ -238,43 +239,43 @@ export async function POST(request: NextRequest) {
                 try {
                     // Apply encryption if requested
                     if (encryption) {
-                        await s3.send(new PutBucketEncryptionCommand({
-                            Bucket: name,
-                            ServerSideEncryptionConfiguration: {
-                                Rules: [
-                                    {
-                                        ApplyServerSideEncryptionByDefault: {
-                                            SSEAlgorithm: 'AES256'
+                            await s3.send(new PutBucketEncryptionCommand({
+                                Bucket: finalBucketName,
+                                ServerSideEncryptionConfiguration: {
+                                    Rules: [
+                                        {
+                                            ApplyServerSideEncryptionByDefault: {
+                                                SSEAlgorithm: 'AES256'
+                                            }
                                         }
-                                    }
-                                ]
-                            }
-                        }));
-                    }
+                                    ]
+                                }
+                            }));
+                        }
 
-                    // Apply CORS configuration
-                    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
-                    if (allowedOrigins.length > 0) {
-                        await s3.send(new PutBucketCorsCommand({
-                            Bucket: name,
-                            CORSConfiguration: {
-                                CORSRules: [
-                                    {
-                                        AllowedHeaders: ["*"],
-                                        AllowedMethods: ["PUT", "POST", "GET", "HEAD"],
-                                        AllowedOrigins: allowedOrigins,
-                                        ExposeHeaders: ["ETag"],
-                                        MaxAgeSeconds: 3000
-                                    }
-                                ]
-                            }
-                        }));
-                    }
+                        // Apply CORS configuration
+                        const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || [];
+                        if (allowedOrigins.length > 0) {
+                            await s3.send(new PutBucketCorsCommand({
+                                Bucket: finalBucketName,
+                                CORSConfiguration: {
+                                    CORSRules: [
+                                        {
+                                            AllowedHeaders: ["*"],
+                                            AllowedMethods: ["PUT", "POST", "GET", "HEAD"],
+                                            AllowedOrigins: allowedOrigins,
+                                            ExposeHeaders: ["ETag"],
+                                            MaxAgeSeconds: 3000
+                                        }
+                                    ]
+                                }
+                            }));
+                        }
                 } catch (configError) {
                     console.error('Failed to configure bucket, rolling back S3 creation:', configError);
                     // Attempt to delete the bucket we just created
                     try {
-                        await s3.send(new DeleteBucketCommand({ Bucket: name }));
+                        await s3.send(new DeleteBucketCommand({ Bucket: finalBucketName }));
                     } catch (cleanupError) {
                         console.error('Failed to cleanup S3 bucket after configuration error:', cleanupError);
                     }
@@ -287,52 +288,15 @@ export async function POST(request: NextRequest) {
 
             console.error('S3 Bucket operation failed:', s3Error);
 
-            if (isImport) {
-                const statusCode = s3Error.$metadata?.httpStatusCode;
-                if (s3Error.name === 'NotFound' || statusCode === 404) {
-                    return NextResponse.json(
-                        { error: `Bucket "${name}" does not exist in S3. Cannot map.` },
-                        { status: 404 }
-                    );
-                }
-                if (s3Error.name === 'Forbidden' || statusCode === 403) {
-                    return NextResponse.json(
-                        { error: `Access denied to bucket "${name}". Check your AWS credentials and IAM permissions.` },
-                        { status: 403 }
-                    );
-                }
-                if (statusCode === 301) {
-                    return NextResponse.json(
-                        { error: `Bucket "${name}" exists but is located in a different region. Please select the correct region.` },
-                        { status: 400 }
-                    );
-                }
-                if (s3Error.name === 'UnknownError') {
-                    if (statusCode) {
-                        return NextResponse.json(
-                            { error: `AWS S3 operation failed with status code ${statusCode}. Please check bucket name and permissions.` },
-                            { status: statusCode }
-                        );
-                    } else {
-                        return NextResponse.json(
-                            { error: `Cannot reach AWS S3. Please verify your credentials, region, and network connection.` },
-                            { status: 500 }
-                        );
-                    }
-                }
-            }
-
-            console.error('S3 CreateBucket failed:', s3Error);
-
             if (s3Error.name === 'BucketAlreadyExists') {
                 return NextResponse.json(
-                    { error: `The bucket name "${name}" is globally unique and already taken by another AWS user. Please choose a different name.` },
+                    { error: `The bucket name "${finalBucketName}" is globally unique and already taken by another AWS user. Please choose a different name.` },
                     { status: 409 }
                 );
             }
             if (s3Error.name === 'BucketAlreadyOwnedByYou') {
                 return NextResponse.json(
-                    { error: `You already own the bucket "${name}" in another region or account.` },
+                    { error: `You already own the bucket "${finalBucketName}" in another region or account.` },
                     { status: 409 }
                 );
             }

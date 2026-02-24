@@ -4,9 +4,9 @@ import type { NextRequest } from 'next/server';
 import { verifyToken } from '@/lib/token';
 
 // Paths that don't require authentication
-const publicPaths = ['/login', '/api/auth/login', '/api/auth/refresh', '/api/auth/logout', '/api/auth/register', '/api/seed'];
+const publicPaths = ['/login', '/api/auth/login', '/api/auth/me', '/api/auth/new-password', '/api/auth/refresh', '/api/auth/logout', '/api/auth/register', '/api/seed'];
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
     // Check for Access Token in Headers (Authorization: Bearer <token>)
@@ -33,6 +33,7 @@ export async function middleware(request: NextRequest) {
     if (!token) {
         // If it's an API route, return 401
         if (pathname.startsWith('/api')) {
+            console.error(`[Middleware Error] Unauthorized access to API: ${pathname}. Reason: Missing Token in Headers/Cookies.`);
             return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
         }
         // If it's a page, redirect to login
@@ -43,14 +44,25 @@ export async function middleware(request: NextRequest) {
 
     if (!payload) {
         if (pathname.startsWith('/api')) {
+            console.error(`[Middleware Error] Unauthorized access to API: ${pathname}. Reason: Invalid/Expired Token.`);
             return NextResponse.json({ error: 'Invalid Token' }, { status: 401 });
         }
         return NextResponse.redirect(new URL('/login', request.url));
     }
 
     // Token is valid, proceed
-    // We can also pass user info via headers if needed, but Next.js limits this.
-    const response = NextResponse.next();
+    // Append the token to the request headers going to downstream APIs
+    const requestHeaders = new Headers(request.headers);
+    if (!authHeader && token) {
+        requestHeaders.set('Authorization', `Bearer ${token}`);
+    }
+
+    const response = NextResponse.next({
+        request: {
+            headers: requestHeaders,
+        }
+    });
+
     response.headers.set('x-user-id', payload.id as string);
     response.headers.set('x-user-role', payload.role as string);
     response.headers.set('x-user-tenant', payload.tenantId as string);

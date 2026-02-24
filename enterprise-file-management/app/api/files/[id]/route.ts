@@ -21,7 +21,7 @@ export async function DELETE(
 
         // @ts-ignore
         const user = await prisma.user.findUnique({
-            where: { id: payload.id as string },
+            where: { email: payload.email as string },
             include: { policies: true }
         });
 
@@ -64,12 +64,12 @@ export async function DELETE(
         const deleteS3Objects = async (prefix: string) => {
             let continuationToken: string | undefined = undefined;
             do {
-                const listCommand = new ListObjectsV2Command({
+                const listCommand: any = new ListObjectsV2Command({
                     Bucket: file.bucket.name,
                     Prefix: prefix,
                     ContinuationToken: continuationToken
                 });
-                const listRes = await s3.send(listCommand);
+                const listRes: any = await s3.send(listCommand);
 
                 if (listRes.Contents && listRes.Contents.length > 0) {
                     // Delete objects one by one or in batch (simple loop for now)
@@ -128,7 +128,7 @@ export async function PATCH(
 
         // @ts-ignore
         const user = await prisma.user.findUnique({
-            where: { id: payload.id as string },
+            where: { email: payload.email as string },
             include: { policies: true }
         });
 

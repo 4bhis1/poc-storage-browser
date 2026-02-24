@@ -1,36 +1,19 @@
+import { jwtVerify, createRemoteJWKSet } from 'jose';
 
-import { SignJWT, jwtVerify } from 'jose';
+const REGION = process.env.AWS_REGION || 'ap-south-1';
+const USER_POOL_ID = process.env.COGNITO_USER_POOL_ID || 'ap-south-1_LDgq3ayzF';
 
-const SECRET_KEY = process.env.JWT_SECRET || process.env.JWT_SECRET_KEY || 'default-secret-key-change-it';
-const ENCODED_SECRET = new TextEncoder().encode(SECRET_KEY);
-
-export async function createAccessToken(payload: any, platform: string = "Web") {
-
-    const expTime = platform === "Agent" ? '15d' : '15m';
-
-    return new SignJWT(payload)
-        .setProtectedHeader({ alg: 'HS256' })
-        .setIssuedAt()
-        .setExpirationTime(expTime) // Short-lived
-        .sign(ENCODED_SECRET);
-}
-
-export async function createRefreshToken(payload: any, platform: string = "Web") {
-
-    const expTime = platform === "Agent" ? '15d' : '7d';
-
-    return new SignJWT(payload)
-        .setProtectedHeader({ alg: 'HS256' })
-        .setIssuedAt()
-        .setExpirationTime(expTime) // Long-lived
-        .sign(ENCODED_SECRET);
-}
+const jwksUrl = new URL(`https://cognito-idp.${REGION}.amazonaws.com/${USER_POOL_ID}/.well-known/jwks.json`);
+const JWKS = createRemoteJWKSet(jwksUrl);
 
 export async function verifyToken(token: string) {
     try {
-        const { payload } = await jwtVerify(token, ENCODED_SECRET);
+        const { payload } = await jwtVerify(token, JWKS, {
+            issuer: `https://cognito-idp.${REGION}.amazonaws.com/${USER_POOL_ID}`,
+        });
         return payload;
     } catch (error) {
+        console.error("Token verification failed:", error);
         return null;
     }
 }

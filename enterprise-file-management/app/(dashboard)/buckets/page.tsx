@@ -73,20 +73,20 @@ const storageClassLabels: Record<string, string> = {
 
 export default function BucketsPage() {
   const [createOpen, setCreateOpen] = React.useState(false)
+  const [isExistingBucket, setIsExistingBucket] = React.useState(false)
   const [buckets, setBuckets] = React.useState<any[]>([])
   const [loading, setLoading] = React.useState(true)
   const [loadingMore, setLoadingMore] = React.useState(false)
-  const [accounts, setAccounts] = React.useState<any[]>([])
-  const [selectedAccountId, setSelectedAccountId] = React.useState<string>('')
 
   const [searchQuery, setSearchQuery] = React.useState('')
-  const [filterAccountId, setFilterAccountId] = React.useState('')
 
   // Pagination state
   const [page, setPage] = React.useState(1)
   const [hasMore, setHasMore] = React.useState(true)
   const observerTarget = React.useRef(null)
-
+  // State for Import Sync Prompt
+  const [importSyncPromptOpen, setImportSyncPromptOpen] = React.useState(false)
+  const [importedBucketId, setImportedBucketId] = React.useState<string | null>(null)
   const [syncing, setSyncing] = React.useState<string | null>(null)
 
   const fetchBuckets = async (pageNum: number, isNewFilter: boolean = false) => {
@@ -99,7 +99,6 @@ export default function BucketsPage() {
         limit: '10',
         search: searchQuery,
       })
-      if (filterAccountId) params.append('accountId', filterAccountId)
 
       const res = await fetchWithAuth(`/api/buckets?${params.toString()}`)
 
@@ -133,7 +132,7 @@ export default function BucketsPage() {
       fetchBuckets(1, true)
     }, 500)
     return () => clearTimeout(timer)
-  }, [searchQuery, filterAccountId])
+  }, [searchQuery])
 
   // Infinite scroll observer
   React.useEffect(() => {
@@ -158,7 +157,6 @@ export default function BucketsPage() {
     }
   }, [hasMore, loading, loadingMore, page])
 
-
   const handleSync = async (bucketId: string) => {
     setSyncing(bucketId)
     try {
@@ -181,43 +179,16 @@ export default function BucketsPage() {
     }
   }
 
-  const fetchAccounts = async () => {
-    try {
-      const res = await fetchWithAuth('/api/accounts?isActive=true')
-      if (res.ok) {
-        const data = await res.json()
-        setAccounts(data)
-        if (data.length > 0) setSelectedAccountId(data[0].id)
-      }
-    } catch {
-      toast.error('Failed to fetch accounts')
-    }
-  }
-
-  // Fetch accounts when dialog opens
-  React.useEffect(() => {
-    if (createOpen) fetchAccounts()
-  }, [createOpen])
-
-  // Also fetch accounts for the filter dropdown
-  React.useEffect(() => {
-    fetchAccounts()
-  }, [])
-
   const handleCreateBucket = async (e: React.FormEvent) => {
     e.preventDefault()
     const form = e.target as HTMLFormElement
     const formData = new FormData(form)
-    const name = formData.get('name') as string
-    const region = formData.get('region') as string
+    const name = formData.get('name') as string || ''
     const versioning = formData.get('versioning') === 'on'
     const encryption = formData.get('encryption') === 'on'
-    const isImport = formData.get('isImport') === 'on'
-
-    if (!selectedAccountId) {
-      toast.error('Please select an AWS account')
-      return
-    }
+    const autoSync = formData.get('autoSync') === 'on'
+    const region = 'ap-south-1' // defaulting region since we removed it from UI
+    const isExisting = isExistingBucket;
 
     try {
       const res = await fetchWithAuth('/api/buckets', {
@@ -225,10 +196,8 @@ export default function BucketsPage() {
         body: JSON.stringify({
           name,
           region,
-          accountId: selectedAccountId,
-          versioning,
           encryption,
-          isImport
+          isExisting
         }),
         headers: {
           'Content-Type': 'application/json',
@@ -236,17 +205,22 @@ export default function BucketsPage() {
       })
 
       if (res.ok) {
-        toast.success(isImport ? "Bucket mapped successfully" : "Bucket created successfully on AWS S3")
+        const data = await res.json()
         setCreateOpen(false)
         form.reset()
         setPage(1)
         fetchBuckets(1, true)
+        toast.success(isExisting ? "Bucket mapped successfully" : "Bucket created successfully on AWS S3")
+        
+        if (isExisting && autoSync) {
+            handleSync(data.id)
+        }
       } else {
         const data = await res.json().catch(() => ({}))
         toast.error(data?.error || "Failed to create bucket")
       }
     } catch (error) {
-      toast.error("Error creating bucket")
+      toast.error(isExisting ? "Error mapped bucket" : "Error creating bucket")
     }
   }
 
@@ -283,96 +257,64 @@ export default function BucketsPage() {
               </DialogTrigger>
               <DialogContent>
                 <DialogHeader>
-                  <DialogTitle>Create New Bucket</DialogTitle>
+                  <DialogTitle>{isExistingBucket ? "Add Existing Bucket" : "Create New Bucket"}</DialogTitle>
                   <DialogDescription>
-                    Configure a new S3 bucket for your organization.
+                    {isExistingBucket ? "Map an existing S3 bucket to your account." : "Create a new S3 bucket connected to your AWS Account."}
                   </DialogDescription>
                 </DialogHeader>
+                <div className="flex items-center space-x-2 py-2">
+                  <Switch
+                    id="existing-bucket-mode"
+                    checked={isExistingBucket}
+                    onCheckedChange={setIsExistingBucket}
+                  />
+                  <Label htmlFor="existing-bucket-mode">Add Existing Bucket?</Label>
+                </div>
                 <form onSubmit={handleCreateBucket} className="space-y-4">
                   <div className="space-y-1.5">
-                    <Label>AWS Account</Label>
-                    {accounts.length === 0 ? (
-                      <p className="text-sm text-muted-foreground py-2">
-                        No AWS accounts found. Please add one in Settings.
-                      </p>
-                    ) : (
-                      <Select
-                        value={selectedAccountId}
-                        onValueChange={setSelectedAccountId}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select an account" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {accounts.map((acc: any) => (
-                            <SelectItem key={acc.id} value={acc.id}>
-                              {acc.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <Label htmlFor="bucket-name">Bucket Name</Label>
+                    <Input id="bucket-name" name="name" placeholder={isExistingBucket ? "exact-bucket-name" : "my-bucket-name"} required />
+                    {!isExistingBucket && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                        Will be created as: FMS-&lt;tenant&gt;-bucket-&lt;name&gt;
+                        </p>
                     )}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="bucket-name">Bucket Name</Label>
-                    <Input id="bucket-name" name="name" placeholder="my-bucket-name" required />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Region</Label>
-                    <Select name="region" defaultValue="us-east-1">
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="us-east-1">US East (N. Virginia)</SelectItem>
-                        <SelectItem value="us-west-2">US West (Oregon)</SelectItem>
-                        <SelectItem value="eu-west-1">EU (Ireland)</SelectItem>
-                        <SelectItem value="ap-southeast-1">Asia Pacific (Singapore)</SelectItem>
-                        <SelectItem value="ap-south-1">Asia Pacific (Mumbai)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Storage Class</Label>
-                    <Select defaultValue="STANDARD">
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="STANDARD">Standard</SelectItem>
-                        <SelectItem value="STANDARD_IA">Infrequent Access</SelectItem>
-                        <SelectItem value="GLACIER">Glacier</SelectItem>
-                        <SelectItem value="DEEP_ARCHIVE">Deep Archive</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Map Existing Bucket</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Connect to an already existing S3 bucket
-                      </p>
-                    </div>
-                    <Switch name="isImport" />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Versioning</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Keep multiple versions of objects
-                      </p>
-                    </div>
-                    <Switch name="versioning" />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div className="space-y-0.5">
-                      <Label>Encryption</Label>
-                      <p className="text-xs text-muted-foreground">
-                        AES-256 server-side encryption
-                      </p>
-                    </div>
-                    <Switch defaultChecked name="encryption" />
-                  </div>
+
+                  {!isExistingBucket && (
+                      <>
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label>Versioning</Label>
+                              <p className="text-xs text-muted-foreground">
+                                Keep multiple versions of objects
+                              </p>
+                            </div>
+                            <Switch name="versioning" />
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <div className="space-y-0.5">
+                              <Label>Encryption</Label>
+                              <p className="text-xs text-muted-foreground">
+                                AES-256 server-side encryption
+                              </p>
+                            </div>
+                            <Switch defaultChecked name="encryption" />
+                          </div>
+                      </>
+                  )}
+
+                  {isExistingBucket && (
+                      <div className="flex items-center justify-between">
+                        <div className="space-y-0.5">
+                          <Label>Sync Bucket</Label>
+                          <p className="text-xs text-muted-foreground">
+                            Automatically import all existing files and folders
+                          </p>
+                        </div>
+                        <Switch defaultChecked name="autoSync" />
+                      </div>
+                  )}
                   <div className="flex justify-end gap-2 pt-2">
                     <Button
                       type="button"
@@ -382,7 +324,7 @@ export default function BucketsPage() {
                       Cancel
                     </Button>
                     <Button type="submit">
-                      Create Bucket
+                      {isExistingBucket ? "Add Bucket" : "Create Bucket"}
                     </Button>
                   </div>
                 </form>
@@ -399,22 +341,6 @@ export default function BucketsPage() {
                 className="max-w-sm"
               />
             </div>
-            <Select
-              value={filterAccountId}
-              onValueChange={(value) => setFilterAccountId(value === "ALL" ? "" : value)}
-            >
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Filter by Account" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="ALL">All Accounts</SelectItem>
-                {accounts.map((acc: any) => (
-                  <SelectItem key={acc.id} value={acc.id}>
-                    {acc.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button variant="outline" size="icon" onClick={() => {
               setPage(1)
               fetchBuckets(1, true)
@@ -485,6 +411,10 @@ export default function BucketsPage() {
                                     <FolderOpen className="mr-2 h-4 w-4" />
                                     Browse Files
                                   </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleSync(bucket.id)} disabled={syncing === bucket.id}>
+                                  <RefreshCw className={`mr-2 h-4 w-4 ${syncing === bucket.id ? 'animate-spin' : ''}`} />
+                                  Force Sync Files
                                 </DropdownMenuItem>
                                 <DropdownMenuItem>
                                   <Settings className="mr-2 h-4 w-4" />
@@ -574,6 +504,29 @@ export default function BucketsPage() {
           )}
         </div>
       </div>
+
+      {/* Import Sync Prompt Dialog */}
+      <Dialog open={importSyncPromptOpen} onOpenChange={setImportSyncPromptOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Bucket Mapped Successfully</DialogTitle>
+            <DialogDescription>
+              Would you like to synchronize the existing files and folders from this bucket into the system now? You can also do this later from the bucket menu.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setImportSyncPromptOpen(false)}>
+              Skip for now
+            </Button>
+            <Button onClick={() => {
+              setImportSyncPromptOpen(false)
+              if (importedBucketId) handleSync(importedBucketId)
+            }}>
+              Yes, Sync Now
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
