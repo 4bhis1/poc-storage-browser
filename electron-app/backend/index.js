@@ -34,14 +34,14 @@ class BackendCentral {
                 return;
             }
 
-            const { bucketId, s3Key } = await this._parsePath(filePath, rootPath);
+            const { bucketId, s3Key, configId } = await this._parsePath(filePath, rootPath);
             if (!bucketId || !s3Key) {
                 console.log(`[Watcher] Skipped ${filePath} (Not in a valid bucket folder)`);
                 return;
             }
 
-            console.log(`[Watcher] Auto-uploading to S3: bucket=${bucketId}, key=${s3Key}`);
-            await this.upload.uploadWithBucketId(bucketId, filePath, s3Key);
+            console.log(`[Watcher] Auto-uploading to S3: bucket=${bucketId}, key=${s3Key}, configId=${configId}`);
+            await this.upload.uploadWithBucketId(bucketId, filePath, s3Key, null, configId);
         } catch (err) {
             console.error('[Watcher] Auto-upload failed:', err.message);
         }
@@ -71,17 +71,33 @@ class BackendCentral {
     }
 
     async _parsePath(localPath, rootPath) {
+        // 1. Check custom sync mappings
+        const mappingRes = await this.db.query('SELECT "localPath", "bucketId", "configId" FROM "SyncMapping"');
+        for (const mapping of mappingRes.rows) {
+            if (localPath.startsWith(mapping.localPath)) {
+                const relative = path.relative(mapping.localPath, localPath);
+                if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
+                    const s3Key = relative.split(path.sep).join('/');
+                    return { bucketId: mapping.bucketId, s3Key, configId: mapping.configId };
+                }
+            }
+        }
+
+        // 2. Fallback to ROOT_PATH
         const relative = path.relative(rootPath, localPath);
-        const parts = relative.split(path.sep);
-        if (parts.length < 1) return { bucketId: null };
-
-        const bucketName = parts[0];
-        const s3Key = parts.slice(1).join('/');
-
-        const dbRes = await this.db.query('SELECT id FROM "Bucket" WHERE name = $1', [bucketName]);
-        if (dbRes.rows.length === 0) return { bucketId: null };
+        if (!relative.startsWith('..')) {
+            const parts = relative.split(path.sep);
+            if (parts.length >= 1) {
+                const bucketName = parts[0];
+                const s3Key = parts.slice(1).join('/');
+                const dbRes = await this.db.query('SELECT id FROM "Bucket" WHERE name = $1', [bucketName]);
+                if (dbRes.rows.length > 0) {
+                    return { bucketId: dbRes.rows[0].id, s3Key, configId: null };
+                }
+            }
+        }
         
-        return { bucketId: dbRes.rows[0].id, s3Key };
+        return { bucketId: null };
     }
 
     /**

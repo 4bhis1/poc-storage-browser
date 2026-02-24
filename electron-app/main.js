@@ -95,6 +95,13 @@ app.whenReady().then(async () => {
   const uploadInProgress = new Set(); // prevent concurrent re-upload of same file
   const downloadingPaths = new Set(); // files being downloaded by SyncManager — watcher must skip these
 
+  backend.sync.addWatcherPath = (folderPath) => {
+    if (watcher) {
+        console.log('[Watcher] Adding path to watch:', folderPath);
+        watcher.add(folderPath);
+    }
+  };
+
   watcher
     .on('add', async (filePath) => {
       if (mainWindow) mainWindow.webContents.send('file-add', filePath);

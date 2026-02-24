@@ -13,6 +13,8 @@ import TransferStatus from "./components/TransferStatus";
 import BucketsPage from "./pages/BucketsPage";
 import FilesPage from "./pages/FilesPage";
 import SyncPage from "./pages/SyncPage";
+import SyncHistoryPage from "./pages/SyncHistoryPage";
+import RecentActivitiesPage from "./pages/RecentActivitiesPage";
 import LoginPage from "./pages/LoginPage";
 import { SystemProvider } from "./contexts/SystemContext";
 
@@ -38,6 +40,8 @@ const Layout = () => {
             <Route path="/" element={<BucketsPage />} />
             <Route path="/files/:bucketId" element={<FilesPage />} />
             <Route path="/sync" element={<SyncPage />} />
+            <Route path="/sync/:configId" element={<SyncHistoryPage />} />
+            <Route path="/recent" element={<RecentActivitiesPage />} />
           </Routes>
         </div>
       </div>

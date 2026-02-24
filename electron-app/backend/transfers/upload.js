@@ -34,6 +34,10 @@ function decrypt(text) {
 }
 
 class UploadManager {
+    constructor() {
+        this.currentConfigId = null;
+        this.currentSyncJobId = null;
+    }
     /**
      * Handles both normal and large files.
      * Uses @aws-sdk/lib-storage Upload for automatic multipart handling.
@@ -70,12 +74,12 @@ class UploadManager {
 
             await upload.done();
             statusManager.completeTransfer(transferId, 'done');
-            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'SUCCESS');
+            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'SUCCESS', null, this.currentConfigId, this.currentSyncJobId);
             return true;
         } catch (error) {
             console.error('[UploadManager] S3 Upload Error:', error.message);
             statusManager.completeTransfer(transferId, 'error');
-            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'FAILED', error.message);
+            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'FAILED', error.message, this.currentConfigId, this.currentSyncJobId);
             throw error;
         }
     }
@@ -83,7 +87,9 @@ class UploadManager {
     /**
      * Resolves credentials and bucket info then uploads.
      */
-    async uploadWithBucketId(bucketId, filePath, s3Key, mimeType) {
+    async uploadWithBucketId(bucketId, filePath, s3Key, mimeType, configId = null, syncJobId = null) {
+        this.currentConfigId = configId;
+        this.currentSyncJobId = syncJobId;
         const dbRes = await database.query(`
             SELECT a."awsAccessKeyId", a."awsSecretAccessKey", b.region, b.name 
             FROM "Bucket" b 

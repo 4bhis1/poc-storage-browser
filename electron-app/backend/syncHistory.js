@@ -42,29 +42,33 @@ class SyncHistoryLogger {
      * @param {'SUCCESS'|'FAILED'} status
      * @param {string} [error]
      */
-    async logActivity(action, fileName, status, error = null) {
+    async logActivity(action, fileName, status, error = null, configId = null, syncJobId = null) {
         // Never log SKIPs — they are noise (file already exists locally)
         if (action === 'SKIP') return;
 
         const id = uuidv4();
         try {
             // Dedup: don't insert if same file+action+status was logged in the last 30 minutes
-            const recent = await database.query(
-                `SELECT id FROM "LocalSyncActivity"
+            let dedupQuery = `SELECT id FROM "LocalSyncActivity"
                  WHERE action = $1 AND "fileName" = $2 AND status = $3
-                   AND "createdAt" > NOW() - INTERVAL '30 minutes'
-                 LIMIT 1`,
-                [action, fileName, status]
-            );
+                   AND "createdAt" > NOW() - INTERVAL '30 minutes'`;
+            let params = [action, fileName, status];
+            if (configId) {
+                dedupQuery += ` AND "configId" = $4`;
+                params.push(configId);
+            }
+            dedupQuery += ` LIMIT 1`;
+
+            const recent = await database.query(dedupQuery, params);
             if (recent.rows.length > 0) {
                 console.log(`[SyncHistory] Dedup skipped: ${action} ${fileName} → ${status}`);
                 return;
             }
 
             await database.query(
-                `INSERT INTO "LocalSyncActivity" (id, action, "fileName", status, error, synced)
-                 VALUES ($1, $2, $3, $4, $5, false)`,
-                [id, action, fileName, status, error]
+                `INSERT INTO "LocalSyncActivity" (id, action, "fileName", status, error, synced, "configId", "syncJobId")
+                 VALUES ($1, $2, $3, $4, $5, false, $6, $7)`,
+                [id, action, fileName, status, error, configId, syncJobId]
             );
             console.log(`[SyncHistory] Local log: ${action} ${fileName} → ${status}`);
         } catch (err) {

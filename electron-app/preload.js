@@ -58,9 +58,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // 6. DB Helpers
-  dbQuery: (text, params) => ipcRenderer.invoke('db-query', { text, params }),
+  dbQuery: (sql, params) => ipcRenderer.invoke('db-query', { sql, params }),
   searchFiles: (query) => ipcRenderer.invoke('search-files', { query }),
-  getLocalSyncActivities: () => ipcRenderer.invoke('get-local-sync-activities'),
+  getSyncConfigs: () => ipcRenderer.invoke('get-sync-configs'),
+  createSyncConfig: (config) => ipcRenderer.invoke('create-sync-config', config),
+  deleteSyncConfig: (id) => ipcRenderer.invoke('delete-sync-config', id),
+  getLocalSyncActivities: (configId) => ipcRenderer.invoke('get-local-sync-activities', configId),
+  getSyncJobs: (configId) => ipcRenderer.invoke('get-sync-jobs', configId),
+  selectSyncFolder: () => ipcRenderer.invoke('select-sync-folder'),
 
   // 7. Watcher Events
   onFileChange: (event, callback) => {

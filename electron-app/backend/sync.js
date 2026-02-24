@@ -41,8 +41,13 @@ class SyncManager {
         if (this.syncIntervalId) clearInterval(this.syncIntervalId);
 
         this.runSync(); // Immediate first sync
-        this.syncIntervalId = setInterval(() => this.runSync(), SYNC_INTERVAL);
-        console.log('[SyncManager] Started');
+        this.syncIntervalId = setInterval(() => this.runSync(), 60000); // check every 1 min
+        console.log('[SyncManager] Started config-based sync 1min clock');
+    }
+
+    reloadConfigs() {
+        console.log('[SyncManager] Requested reload of configs. Running immediately.');
+        this.runSync();
     }
 
     stop() {
@@ -66,6 +71,7 @@ class SyncManager {
 
         try {
             await this.syncAll();
+            await this.syncConfigs();
         } catch (error) {
             console.error('[SyncManager] Cycle Error:', error.message);
             if (error.response?.status === 401) {
@@ -121,21 +127,73 @@ class SyncManager {
 
             console.log(`[SyncManager] Account synced: ${account.name} (creds: ${account.awsAccessKeyId ? 'OK' : 'MISSING'})`);
 
-            // 3. For each bucket — check changes and download missing files
+            // 3. For each bucket — upsert metadata to local DB
             for (const bucket of (account.buckets || [])) {
-                await this.syncBucket(bucket);
+                await this.upsertBucketMetadata(bucket);
+                // Retain backward compatibility: if no configs use this bucket, sync to default ROOT_PATH
+                const checkMaps = await database.query('SELECT id FROM "SyncMapping" WHERE "bucketId" = $1', [bucket.id]);
+                if (checkMaps.rows.length === 0) {
+                     await this.syncBucketToLocal(bucket, path.join(ROOT_PATH, bucket.name), null);
+                }
             }
         }
+    }
 
-        const totalBuckets = (accounts || []).reduce((s, a) => s + (a.buckets || []).length, 0);
-        console.log(`[SyncManager] Full sync complete — ${(accounts || []).length} accounts, ${totalBuckets} buckets`);
+    async syncConfigs() {
+        // Read configs that need sync
+        const configs = await database.query(`
+            SELECT * FROM "SyncConfig" 
+            WHERE "isActive" = true AND 
+            ("lastSync" IS NULL OR "lastSync" < NOW() - ("intervalMinutes" * interval '1 minute'))
+        `);
+
+        for (const config of configs.rows) {
+            console.log(`[SyncManager] Running scheduled sync config: ${config.name}`);
+            
+            const jobId = 'job-' + Date.now();
+            await database.query(
+                `INSERT INTO "SyncJob" (id, "configId", status, "startTime") VALUES ($1, $2, $3, NOW())`,
+                [jobId, config.id, 'RUNNING']
+            );
+
+            let filesHandled = 0;
+            try {
+                const mappings = await database.query('SELECT * FROM "SyncMapping" WHERE "configId" = $1', [config.id]);
+                for (const map of mappings.rows) {
+                    // Get all files for this bucket from local DB
+                    const filesQuery = await database.query('SELECT * FROM "FileObject" WHERE "bucketId" = $1', [map.bucketId]);
+                    const bucketMock = {
+                        id: map.bucketId,
+                        name: (await database.query('SELECT name FROM "Bucket" WHERE id = $1', [map.bucketId])).rows[0]?.name,
+                        files: filesQuery.rows
+                    };
+                    if (bucketMock.name) {
+                        const dl = await this.syncBucketToLocal(bucketMock, map.localPath, config.id, jobId);
+                        const ul = await this.syncLocalToBucket(bucketMock, map.localPath, config.id, jobId);
+                        filesHandled += (dl + ul);
+                    }
+                }
+                await database.query(
+                    `UPDATE "SyncJob" SET status = $1, "endTime" = NOW(), "filesHandled" = $2 WHERE id = $3`,
+                    ['COMPLETED', filesHandled, jobId]
+                );
+            } catch (err) {
+                console.error(`[SyncManager] SyncJob ${jobId} failed:`, err);
+                await database.query(
+                    `UPDATE "SyncJob" SET status = $1, "endTime" = NOW(), error = $2 WHERE id = $3`,
+                    ['FAILED', err.message, jobId]
+                );
+            }
+
+            await database.query(`UPDATE "SyncConfig" SET "lastSync" = NOW() WHERE id = $1`, [config.id]);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // PER-BUCKET SYNC: upsert metadata + download missing files
     // ─────────────────────────────────────────────────────────────────────────
 
-    async syncBucket(bucket) {
+    async upsertBucketMetadata(bucket) {
         // Upsert bucket record into local DB
         await database.query(`
             INSERT INTO "Bucket" (id, name, region, "accountId", "updatedAt")
@@ -146,13 +204,42 @@ class SyncManager {
                 "updatedAt" = EXCLUDED."updatedAt"
         `, [bucket.id, bucket.name, bucket.region, bucket.accountId, bucket.updatedAt || new Date()]);
 
-        // Ensure local root folder exists for this bucket
-        const bucketLocalPath = path.join(ROOT_PATH, bucket.name);
-        if (!fs.existsSync(bucketLocalPath)) {
-            fs.mkdirSync(bucketLocalPath, { recursive: true });
+        const files = bucket.files || [];
+        for (const file of files) {
+            if (!file.key) continue;
+
+            // Upsert FileObject into local DB so search works
+            await database.query(`
+                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt")
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    key = EXCLUDED.key,
+                    "isFolder" = EXCLUDED."isFolder",
+                    size = EXCLUDED.size,
+                    "mimeType" = EXCLUDED."mimeType",
+                    "updatedAt" = EXCLUDED."updatedAt",
+                    "isSynced" = true,
+                    "lastSyncedAt" = NOW()
+            `, [
+                file.id || `${bucket.id}-${file.key}`,
+                file.name || file.key.split('/').pop() || file.key,
+                file.key,
+                file.isFolder || false,
+                file.size || null,
+                file.mimeType || null,
+                bucket.id,
+                file.updatedAt || new Date()
+            ]);
+        }
+    }
+
+    async syncBucketToLocal(bucket, rootFolder, configId, syncJobId = null) {
+        // Ensure local root folder exists
+        if (!fs.existsSync(rootFolder)) {
+            fs.mkdirSync(rootFolder, { recursive: true });
         }
 
-        // Check each file from the Global DB against local filesystem
         const files = bucket.files || [];
         let downloadCount = 0;
         let skippedCount = 0;
@@ -186,25 +273,23 @@ class SyncManager {
 
             if (file.isFolder) {
                 // Ensure the local directory exists
-                const dirPath = path.join(ROOT_PATH, bucket.name, file.key.replace(/\/$/, ''));
+                const dirPath = path.join(rootFolder, file.key.replace(/\/$/, ''));
                 if (!fs.existsSync(dirPath)) {
                     fs.mkdirSync(dirPath, { recursive: true });
                 }
-                // Folders are not tracked as activities — they are auto-created
                 continue;
             }
 
             // Build the expected local path for this file
-            const localFilePath = path.join(ROOT_PATH, bucket.name, file.key);
+            const localFilePath = path.join(rootFolder, file.key);
 
             // Check if the file already exists locally with matching size
             const existsLocally = fs.existsSync(localFilePath);
             if (existsLocally) {
                 const localStat = fs.statSync(localFilePath);
-                if (file.size && localStat.size === file.size) {
+                if (file.size && localStat.size === parseInt(file.size)) {
                     skippedCount++;
-                    // Don't log SKIPs — they are noise (file already synced, no action taken)
-                    continue; // Already synced — no action needed
+                    continue; // Already synced
                 }
                 console.log(`[SyncManager] File size mismatch, re-downloading: ${file.key}`);
             }
@@ -213,16 +298,64 @@ class SyncManager {
             try {
                 await this.downloadFile(bucket, file, localFilePath);
                 downloadCount++;
-                await syncHistory.logActivity('DOWNLOAD', file.key, 'SUCCESS');
+                await syncHistory.logActivity('DOWNLOAD', file.key, 'SUCCESS', null, configId, syncJobId);
             } catch (err) {
                 console.error(`[SyncManager] Failed to download ${file.key}:`, err.message);
-                await syncHistory.logActivity('DOWNLOAD', file.key, 'FAILED', err.message);
+                await syncHistory.logActivity('DOWNLOAD', file.key, 'FAILED', err.message, configId, syncJobId);
             }
         }
 
         if (files.length > 0) {
             console.log(`[SyncManager] Bucket "${bucket.name}": ${files.length} remote files, ${downloadCount} downloaded, ${skippedCount} already local`);
         }
+        return downloadCount;
+    }
+
+    async syncLocalToBucket(bucket, rootFolder, configId, syncJobId = null) {
+        if (!fs.existsSync(rootFolder)) return;
+
+        // Recursively find all files in rootFolder
+        const walk = async (dir) => {
+            let results = [];
+            const list = await fsPromises.readdir(dir, { withFileTypes: true });
+            for (let e of list) {
+                const fullPath = path.join(dir, e.name);
+                if (e.isDirectory()) {
+                    results = results.concat(await walk(fullPath));
+                } else {
+                    results.push(fullPath);
+                }
+            }
+            return results;
+        };
+
+        const localFiles = await walk(rootFolder);
+        const remoteKeys = new Set(bucket.files.map(f => f.key));
+
+        let uploadCount = 0;
+        const uploadManager = require('./transfers/upload');
+
+        for (const localPath of localFiles) {
+            const relativePath = path.relative(rootFolder, localPath);
+            const s3Key = relativePath.split(path.sep).join('/');
+
+            if (!remoteKeys.has(s3Key)) {
+                // File exists locally but NOT in S3 — we must re-upload
+                // (Or it's a new file chokidar missed).
+                console.log(`[SyncManager] Local file missing in S3, re-uploading: ${s3Key}`);
+                try {
+                    await uploadManager.uploadWithBucketId(bucket.id, localPath, s3Key, null, configId, syncJobId);
+                    uploadCount++;
+                } catch (err) {
+                    console.error(`[SyncManager] Failed to cron-upload ${s3Key}:`, err.message);
+                }
+            }
+        }
+
+        if (uploadCount > 0) {
+            console.log(`[SyncManager] Bucket "${bucket.name}": Re-uploaded ${uploadCount} missing files from local folder ${rootFolder}`);
+        }
+        return uploadCount;
     }
 
     // ─────────────────────────────────────────────────────────────────────────

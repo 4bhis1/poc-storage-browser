@@ -105,16 +105,102 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
     });
 
     // 7. Read local sync activities directly from local DB
-    ipcMain.handle('get-local-sync-activities', async () => {
+    ipcMain.handle('get-local-sync-activities', async (event, configId) => {
         try {
-            const result = await backend.db.query(
-                `SELECT * FROM "LocalSyncActivity" ORDER BY "createdAt" DESC LIMIT 200`
-            );
+            let query = `SELECT * FROM "LocalSyncActivity"`;
+            let params = [];
+            if (configId) {
+                query += ` WHERE "configId" = $1`;
+                params.push(configId);
+            }
+            query += ` ORDER BY "createdAt" DESC LIMIT 200`;
+            const result = await backend.db.query(query, params);
             return result.rows;
         } catch (err) {
             console.error('[IPC] get-local-sync-activities error:', err.message);
             return [];
         }
+    });
+    
+    ipcMain.handle('get-sync-jobs', async (event, configId) => {
+        try {
+            const jobs = await backend.db.query(
+                `SELECT * FROM "SyncJob" WHERE "configId" = $1 ORDER BY "startTime" DESC LIMIT 50`,
+                [configId]
+            );
+            return jobs.rows;
+        } catch (err) {
+            console.error('[IPC] get-sync-jobs error:', err.message);
+            return [];
+        }
+    });
+
+    // 8. Configurable Sync
+    ipcMain.handle('get-sync-configs', async () => {
+        try {
+            const configs = await backend.db.query(`SELECT * FROM "SyncConfig" ORDER BY "createdAt" DESC`);
+            const configsData = configs.rows;
+            for (let config of configsData) {
+                const mappings = await backend.db.query(`SELECT * FROM "SyncMapping" WHERE "configId" = $1`, [config.id]);
+                config.mappings = mappings.rows;
+            }
+            return configsData;
+        } catch (err) {
+            console.error('[IPC] get-sync-configs error:', err);
+            return [];
+        }
+    });
+
+    ipcMain.handle('create-sync-config', async (event, { name, intervalMinutes, mappings }) => {
+        try {
+            const id = 'cfg-' + Date.now();
+            await backend.db.query(
+                `INSERT INTO "SyncConfig" (id, name, "intervalMinutes") VALUES ($1, $2, $3)`,
+                [id, name, intervalMinutes]
+            );
+            
+            for (const map of mappings) {
+                const mapId = 'map-' + Date.now() + Math.random().toString(36).substring(7);
+                await backend.db.query(
+                    `INSERT INTO "SyncMapping" (id, "configId", "localPath", "bucketId") VALUES ($1, $2, $3, $4)`,
+                    [mapId, id, map.localPath, map.bucketId]
+                );
+                
+                // Add to active watcher
+                if (backend.sync.addWatcherPath) {
+                   backend.sync.addWatcherPath(map.localPath);
+                }
+            }
+            
+            // Reload configs into active sync queue
+            if (backend.sync.reloadConfigs) {
+                backend.sync.reloadConfigs();
+            }
+
+            return { success: true, id };
+        } catch (err) {
+            console.error('[IPC] create-sync-config error:', err);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('delete-sync-config', async (event, configId) => {
+        try {
+            await backend.db.query(`DELETE FROM "SyncConfig" WHERE id = $1`, [configId]);
+            if (backend.sync.reloadConfigs) {
+                backend.sync.reloadConfigs();
+            }
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('select-sync-folder', async () => {
+        const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+            properties: ['openDirectory']
+        });
+        return canceled ? null : filePaths[0];
     });
 }
 

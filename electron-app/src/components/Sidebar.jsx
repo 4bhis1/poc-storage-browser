@@ -23,13 +23,24 @@ const Sidebar = () => {
                 <button
                     onClick={() => navigate('/sync')}
                     className={`flex items-center w-full px-4 py-2.5 rounded-full text-sm font-medium transition-colors ${
-                        location.pathname === '/sync'
+                        location.pathname.startsWith('/sync')
                             ? 'bg-blue-100/70 text-blue-900'
                             : 'text-slate-700 hover:bg-[#e8ebf0] hover:text-slate-900'
                     }`}
                 >
                     <RefreshCw className="h-[18px] w-[18px] mr-4" strokeWidth={2} />
                     Sync
+                </button>
+                <button
+                    onClick={() => navigate('/recent')}
+                    className={`flex items-center w-full px-4 py-2.5 rounded-full text-sm font-medium transition-colors ${
+                        location.pathname === '/recent'
+                            ? 'bg-blue-100/70 text-blue-900'
+                            : 'text-slate-700 hover:bg-[#e8ebf0] hover:text-slate-900'
+                    }`}
+                >
+                    <Clock className="h-[18px] w-[18px] mr-4" strokeWidth={2} />
+                    Recent Activities
                 </button>
             </div>
         </div>
