@@ -46,7 +46,7 @@ export interface Bucket {
 
 export interface AuditLog {
   id: string
-  action: "upload" | "download" | "delete" | "share" | "create_bucket" | "modify" | "view"
+  action: "upload" | "download" | "delete" | "share" | "create_bucket" | "modify" | "view" | "invite_user" | "sync"
   user: string
   userEmail: string
   file: string
@@ -304,8 +304,10 @@ export const mockBuckets: Bucket[] = [
 export const mockAuditLogs: AuditLog[] = [
   { id: "a1", action: "upload", user: "Sarah Chen", userEmail: "sarah@acme.co", file: "system-design-v3.pdf", bucket: "prod-assets", timestamp: "2026-02-17T09:23:00Z", ip: "192.168.1.42", details: "4.5 MB uploaded" },
   { id: "a2", action: "download", user: "Marcus Kim", userEmail: "marcus@acme.co", file: "brand-guidelines-2026.pdf", bucket: "prod-assets", timestamp: "2026-02-17T08:15:00Z", ip: "10.0.0.15", details: "Direct download" },
+  { id: "a2.1", action: "invite_user", user: "Sarah Chen", userEmail: "sarah@acme.co", file: "-", bucket: "-", timestamp: "2026-02-17T08:10:00Z", ip: "192.168.1.42", details: "Invited user: vendor-tech@external.com" },
   { id: "a3", action: "share", user: "Elena Volkov", userEmail: "elena@acme.co", file: "company-handbook.pdf", bucket: "prod-assets", timestamp: "2026-02-16T16:42:00Z", ip: "172.16.0.8", details: "Shared with external partner" },
   { id: "a4", action: "delete", user: "Alex Rivera", userEmail: "alex@acme.co", file: "old-backup-2024.tar.gz", bucket: "media-archive", timestamp: "2026-02-16T14:10:00Z", ip: "192.168.1.100", details: "Permanent deletion" },
+  { id: "a4.1", action: "sync", user: "System", userEmail: "system@acme.co", file: "Marketing/Brand Assets", bucket: "prod-assets", timestamp: "2026-02-15T12:00:00Z", ip: "10.0.0.1", details: "Synced 3 files automatically" },
   { id: "a5", action: "create_bucket", user: "Sarah Chen", userEmail: "sarah@acme.co", file: "-", bucket: "staging-assets", timestamp: "2026-02-15T11:00:00Z", ip: "192.168.1.42", details: "Region: eu-west-1, Class: STANDARD" },
   { id: "a6", action: "modify", user: "Priya Sharma", userEmail: "priya@acme.co", file: "budget-forecast-q1.xlsx", bucket: "finance-vault", timestamp: "2026-02-15T09:30:00Z", ip: "10.0.0.22", details: "File overwritten (v3 -> v4)" },
   { id: "a7", action: "upload", user: "James Wu", userEmail: "james@acme.co", file: "product-demo.mp4", bucket: "prod-assets", timestamp: "2026-02-14T15:20:00Z", ip: "172.16.0.33", details: "145 MB uploaded" },

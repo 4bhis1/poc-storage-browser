@@ -59,9 +59,6 @@ export async function GET(request: NextRequest) {
         }
 
         const account = bucket.account;
-        if (!account.awsAccessKeyId || !account.awsSecretAccessKey) {
-            return NextResponse.json({ error: 'AWS credentials missing for this account' }, { status: 422 });
-        }
 
         // Determine Key
         let key: string = name;
@@ -73,14 +70,17 @@ export async function GET(request: NextRequest) {
                 key = `${prefix}${name}`;
             }
         }
+      // Support fallback to environment AWS_PROFILE credentials
+        const s3ClientConfig: any = { region: bucket.region };
+        
+        if (account.awsAccessKeyId && account.awsSecretAccessKey) {
+             s3ClientConfig.credentials = {
+                 accessKeyId: decrypt(account.awsAccessKeyId),
+                 secretAccessKey: decrypt(account.awsSecretAccessKey),
+             };
+        }
 
-        const s3 = new S3Client({
-            region: bucket.region,
-            credentials: {
-                accessKeyId: decrypt(account.awsAccessKeyId!),
-                secretAccessKey: decrypt(account.awsSecretAccessKey!),
-            },
-        });
+        const s3 = new S3Client(s3ClientConfig);
         console.log(">>>>>>>>>>>key", key);
 
         let command;

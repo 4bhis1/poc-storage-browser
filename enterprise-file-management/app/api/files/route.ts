@@ -75,9 +75,6 @@ export async function POST(request: NextRequest) {
         }
 
         const account = bucket.account;
-        if (!account.awsAccessKeyId || !account.awsSecretAccessKey) {
-            return NextResponse.json({ error: 'AWS credentials missing for this account' }, { status: 422 });
-        }
 
         // 2. Determine the full Key (path)
         let key = name;
@@ -95,13 +92,14 @@ export async function POST(request: NextRequest) {
         // 3. If it's a folder, create it in S3
         if (isFolder) {
             try {
-                const s3 = new S3Client({
-                    region: bucket.region,
-                    credentials: {
-                        accessKeyId: decrypt(account.awsAccessKeyId!),
-                        secretAccessKey: decrypt(account.awsSecretAccessKey!),
-                    },
-                });
+                const s3ClientConfig: any = { region: bucket.region };
+                if (account.awsAccessKeyId && account.awsSecretAccessKey) {
+                    s3ClientConfig.credentials = {
+                        accessKeyId: decrypt(account.awsAccessKeyId),
+                        secretAccessKey: decrypt(account.awsSecretAccessKey),
+                    };
+                }
+                const s3 = new S3Client(s3ClientConfig);
 
                 // S3 folders are typically represented by a zero-byte object with a trailing slash
                 const s3Key = key.endsWith('/') ? key : `${key}/`;

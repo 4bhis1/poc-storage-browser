@@ -10,6 +10,8 @@ import {
   Share2,
   Trash2,
   Upload,
+  UserPlus,
+  RefreshCw,
 } from "lucide-react"
 import {
   Area,
@@ -64,6 +66,8 @@ const actionIcons: Record<string, React.ElementType> = {
   create_bucket: Plus,
   modify: FileUp,
   view: Eye,
+  invite_user: UserPlus,
+  sync: RefreshCw,
 }
 
 const actionColors: Record<string, string> = {
@@ -74,6 +78,8 @@ const actionColors: Record<string, string> = {
   create_bucket: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
   modify: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
   view: "bg-gray-500/10 text-gray-600 dark:text-gray-400",
+  invite_user: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+  sync: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
 }
 
 const latestCost = mockCostData[mockCostData.length - 1]
@@ -95,7 +101,7 @@ export default function AuditPage() {
         <Breadcrumb>
           <BreadcrumbList>
             <BreadcrumbItem>
-              <BreadcrumbPage>Audit & Costs</BreadcrumbPage>
+              <BreadcrumbPage>Audit & Sync Logs</BreadcrumbPage>
             </BreadcrumbItem>
           </BreadcrumbList>
         </Breadcrumb>
@@ -105,17 +111,17 @@ export default function AuditPage() {
         <div className="p-6 space-y-6">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              Audit & Costs
+              Audit & Sync Logs
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Monitor storage costs and review activity logs.
+              Monitor storage costs, manage file syncing activities, and review user audit logs.
             </p>
           </div>
 
           <Tabs defaultValue="costs" className="space-y-6">
             <TabsList>
               <TabsTrigger value="costs">Cost Overview</TabsTrigger>
-              <TabsTrigger value="logs">Audit Logs</TabsTrigger>
+              <TabsTrigger value="logs">Sync & Activity Logs</TabsTrigger>
             </TabsList>
 
             {/* Cost Overview */}
@@ -359,6 +365,12 @@ export default function AuditPage() {
                       <SelectItem value="view">View</SelectItem>
                       <SelectItem value="create_bucket">
                         Create Bucket
+                      </SelectItem>
+                      <SelectItem value="invite_user">
+                        Invite User
+                      </SelectItem>
+                      <SelectItem value="sync">
+                        Folder Sync
                       </SelectItem>
                     </SelectContent>
                   </Select>
