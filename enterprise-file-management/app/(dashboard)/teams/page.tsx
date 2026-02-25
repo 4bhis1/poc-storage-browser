@@ -2,33 +2,25 @@
 
 import * as React from "react";
 import { useRouter } from "next/navigation";
-import { GenericTable } from "@/components/ui/generic-table";
+import { DataTable, ColumnDef } from "@/components/ui/data-table";
 import { GenericModal } from "@/components/ui/generic-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Users, Settings, Plus } from "lucide-react";
 
 export default function TeamsPage() {
   const [teams, setTeams] = React.useState<any[]>([]);
-  const [users, setUsers] = React.useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = React.useState(false);
-  const [isInviteOpen, setIsInviteOpen] = React.useState(false);
   const [teamName, setTeamName] = React.useState("");
-  const [inviteEmail, setInviteEmail] = React.useState("");
-  const [inviteName, setInviteName] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
+  const [searchTerm, setSearchTerm] = React.useState("");
   const router = useRouter();
 
   React.useEffect(() => {
     fetch("/api/tenant/teams")
       .then((res) => res.json())
       .then((data) => (Array.isArray(data) ? setTeams(data) : setTeams([])))
-      .catch(console.error);
-
-    fetch("/api/users")
-      .then((res) => res.json())
-      .then((data) => (Array.isArray(data) ? setUsers(data) : setUsers([])))
       .catch(console.error);
   }, []);
 
@@ -62,202 +54,124 @@ export default function TeamsPage() {
     }
   };
 
-  const handleInviteUser = async () => {
-    if (!inviteEmail.trim()) {
-      setError("Email is required.");
-      return;
-    }
-    setError("");
-    setLoading(true);
-    try {
-      const res = await fetch("/api/users", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: inviteEmail,
-          name: inviteName,
-          password: "TempPassword123!",
-        }),
-      });
-      if (res.ok) {
-        const newUser = await res.json();
-        setUsers([newUser, ...users]);
-        setIsInviteOpen(false);
-        setInviteEmail("");
-        setInviteName("");
-      } else {
-        const err = await res.json();
-        setError(err.error || "Failed to invite user");
-      }
-    } catch (e) {
-      setError("Unexpected error. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  const filteredTeams = teams.filter((t) => 
+    t.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
-  const teamColumns = [
-    { header: "Team Name", accessorKey: "name" },
+  const teamColumns: ColumnDef<any>[] = [
+    { 
+      header: "Team Name", 
+      accessorKey: "name",
+      cell: (row) => (
+        <div className="flex items-center gap-3">
+          <div className="bg-primary/10 p-2 rounded-md text-primary">
+            <Users className="h-4 w-4" />
+          </div>
+          <span className="font-semibold">{row.name}</span>
+        </div>
+      )
+    },
     {
       header: "Members",
       accessorKey: "_count",
-      cell: (row: any) => row._count?.members || 0,
+      cell: (row) => (
+        <span className="text-muted-foreground">{row._count?.members || 0} users</span>
+      ),
     },
     {
       header: "Created On",
       accessorKey: "createdAt",
-      cell: (row: any) => new Date(row.createdAt).toLocaleDateString(),
+      cell: (row) => (
+        <span className="text-muted-foreground">
+          {new Date(row.createdAt).toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          })}
+        </span>
+      ),
     },
     {
       header: "Actions",
       accessorKey: "actions",
-      cell: (row: any) => (
+      className: "text-right",
+      cell: (row) => (
         <Button
           variant="outline"
           size="sm"
-          onClick={() => router.push(`/teams/${row.id}`)}
+          className="gap-2"
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/teams/${row.id}`);
+          }}
         >
-          View & Manage
+          <Settings className="h-4 w-4" />
+          Manage Permissions
         </Button>
       ),
     },
   ];
 
-  const userColumns = [
-    {
-      header: "Name",
-      accessorKey: "name",
-      cell: (row: any) => row.name || "—",
-    },
-    { header: "Email", accessorKey: "email" },
-    { header: "Role", accessorKey: "role" },
-    {
-      header: "Joined",
-      accessorKey: "createdAt",
-      cell: (row: any) => new Date(row.createdAt).toLocaleDateString(),
-    },
-    {
-      header: "Teams part of",
-      accessorKey: "teams",
-      cell: (row: any) => {
-          const t = row.teams?.map((m: any) => m.team?.name).filter(Boolean);
-          if (!t || t.length === 0) return "—";
-          return t.join(", ");
-      }
-    }
-  ];
-
   return (
-    <div className="flex-1 overflow-auto space-y-6 px-4 md:px-6 lg:px-8 py-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Teams and Roles</h1>
-        <p className="text-muted-foreground mt-1">
-          Manage tenant users, teams, and their bucket permissions.
-        </p>
+    <div className="p-6 h-full flex flex-col space-y-6 ">
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Teams</h1>
+          <p className="text-muted-foreground mt-1">
+            Manage teams and map permissions for resources like buckets.
+          </p>
+        </div>
+        <GenericModal
+          title="Create New Team"
+          description="Create a team to easily group users and assign permissions."
+          open={isModalOpen}
+          onOpenChange={(open) => {
+            setIsModalOpen(open);
+            setError("");
+          }}
+          trigger={
+            <Button className="gap-2">
+              <Plus className="h-4 w-4" />
+              Create Team
+            </Button>
+          }
+          footer={
+            <Button disabled={loading} onClick={handleCreateTeam}>
+              {loading ? "Creating..." : "Create Team"}
+            </Button>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium">Team Name</label>
+              <Input
+                value={teamName}
+                onChange={(e) => setTeamName(e.target.value)}
+                placeholder="e.g., Marketing, Engineering"
+                className="mt-1"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateTeam();
+                }}
+              />
+            </div>
+            {error && (
+              <p className="text-sm text-red-500 font-medium">{error}</p>
+            )}
+          </div>
+        </GenericModal>
       </div>
 
-      <Tabs defaultValue="users" className="w-full">
-        <TabsList className="mb-4">
-          <TabsTrigger value="users">Users</TabsTrigger>
-          <TabsTrigger value="teams">Teams & Roles</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="users" className="space-y-4">
-          <div className="flex justify-between items-center bg-white dark:bg-slate-950 px-6 py-4 border rounded-t-lg shadow-sm">
-            <h2 className="text-xl font-semibold">Tenant Users</h2>
-            <GenericModal
-              title="Invite User"
-              description="Invite a new user to join this tenant. They will receive a temporary password."
-              open={isInviteOpen}
-              onOpenChange={(open) => {
-                setIsInviteOpen(open);
-                setError("");
-              }}
-              trigger={<Button>Invite User</Button>}
-              footer={
-                <Button disabled={loading} onClick={handleInviteUser}>
-                  {loading ? "Inviting..." : "Send Invite"}
-                </Button>
-              }
-            >
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium">Name (Optional)</label>
-                  <Input
-                    value={inviteName}
-                    onChange={(e) => setInviteName(e.target.value)}
-                    placeholder="John Doe"
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm font-medium">Email Address</label>
-                  <Input
-                    value={inviteEmail}
-                    onChange={(e) => setInviteEmail(e.target.value)}
-                    placeholder="user@example.com"
-                    type="email"
-                    className="mt-1"
-                  />
-                </div>
-                {error && (
-                  <p className="text-sm text-red-500 font-medium">{error}</p>
-                )}
-              </div>
-            </GenericModal>
-          </div>
-          <GenericTable
-            data={users}
-            columns={userColumns}
-            emptyMessage="No users found in this tenant."
-          />
-        </TabsContent>
-
-        <TabsContent value="teams" className="space-y-4">
-          <div className="flex justify-between items-center bg-white dark:bg-slate-950 px-6 py-4 border rounded-t-lg shadow-sm">
-            <h2 className="text-xl font-semibold">Teams</h2>
-            <GenericModal
-              title="Create New Team"
-              description="Create a team to easily group users and assign bucket permissions."
-              open={isModalOpen}
-              onOpenChange={(open) => {
-                setIsModalOpen(open);
-                setError("");
-              }}
-              trigger={<Button>Create Team</Button>}
-              footer={
-                <Button disabled={loading} onClick={handleCreateTeam}>
-                  {loading ? "Creating..." : "Create Team"}
-                </Button>
-              }
-            >
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium">Team Name</label>
-                  <Input
-                    value={teamName}
-                    onChange={(e) => setTeamName(e.target.value)}
-                    placeholder="e.g., Marketing, Engineering"
-                    className="mt-1"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") handleCreateTeam();
-                    }}
-                  />
-                </div>
-                {error && (
-                  <p className="text-sm text-red-500 font-medium">{error}</p>
-                )}
-              </div>
-            </GenericModal>
-          </div>
-          <GenericTable
-            data={teams}
-            columns={teamColumns}
-            emptyMessage="No teams found. Create one to get started."
-          />
-        </TabsContent>
-      </Tabs>
+      <div className="flex-1 bg-background rounded-lg border shadow-sm p-4">
+        <DataTable
+          data={filteredTeams}
+          columns={teamColumns}
+          searchPlaceholder="Search teams by name..."
+          onSearch={setSearchTerm}
+          emptyMessage="No teams found. Create one to get started."
+          onRowClick={(row) => router.push(`/teams/${row.id}`)}
+        />
+      </div>
     </div>
   );
 }

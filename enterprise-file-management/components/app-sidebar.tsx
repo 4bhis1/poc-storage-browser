@@ -55,11 +55,12 @@ const platformAdminNav = [
 
 const tenantNav = [
   { title: "Dashboard", icon: LayoutDashboard, href: "/" },
+  { title: "Users", icon: User, href: "/users" },
+  { title: "Teams", icon: Users, href: "/teams" },
   { title: "Buckets", icon: HardDrive, href: "/buckets" },
   { title: "Files", icon: FolderOpen, href: "/files" },
   { title: "Shares", icon: Share2, href: "/shares" },
   { title: "Audit", icon: FileText, href: "/audit" },
-  { title: "Teams and Roles", icon: Users, href: "/teams" },
   { title: "Settings", icon: Settings, href: "/settings" },
 ];
 

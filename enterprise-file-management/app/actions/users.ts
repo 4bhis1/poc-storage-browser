@@ -9,16 +9,30 @@ import { revalidatePath } from "next/cache"
 export async function getUsers() {
     try {
         const currentUser = await getCurrentUser()
-        if (!currentUser || currentUser.role !== "PLATFORM_ADMIN") {
+        if (!currentUser) {
             return { success: false, error: "Unauthorized" }
         }
 
+        let whereClause = {};
+        if (currentUser.role !== "PLATFORM_ADMIN") {
+            if (!currentUser.tenantId) {
+                return { success: false, error: "Unauthorized" };
+            }
+            whereClause = { tenantId: currentUser.tenantId };
+        }
+
         const users = await prisma.user.findMany({
+            where: whereClause,
             orderBy: {
                 createdAt: 'desc',
             },
             include: {
                 tenant: true,
+                teams: {
+                    include: {
+                        team: true
+                    }
+                }
             },
         })
 
@@ -41,8 +55,14 @@ export async function inviteUser(formData: FormData) {
 
     try {
         const currentUser = await getCurrentUser()
-        if (!currentUser || currentUser.role !== "PLATFORM_ADMIN") {
+        if (!currentUser) {
             return { success: false, error: "Unauthorized" }
+        }
+
+        if (currentUser.role !== "PLATFORM_ADMIN") {
+            if (currentUser.role !== "TENANT_ADMIN" || currentUser.tenantId !== tenantId) {
+                return { success: false, error: "Unauthorized to invite to this tenant" }
+            }
         }
 
         // Invite User to Cognito (sends magic link/temp password)

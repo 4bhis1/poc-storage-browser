@@ -1,26 +1,21 @@
 "use client";
 
-import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import * as React from "react";
 import { InviteUserModal } from "./invite-user-modal";
-import { Search } from "lucide-react";
-import { useState } from "react";
+import { DataTable, ColumnDef } from "@/components/ui/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { TeamMappingModal } from "./team-mapping-modal";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Button } from "@/components/ui/button";
+import { MoreHorizontal, Users, Shield, Trash2, Mail } from "lucide-react";
+import { usePermission } from "@/lib/hooks/usePermission";
 
 interface UserItem {
   id: string;
@@ -29,6 +24,7 @@ interface UserItem {
   role: string;
   tenantName: string;
   createdAt: string;
+  teams?: any[];
 }
 
 interface TenantItem {
@@ -36,111 +32,189 @@ interface TenantItem {
   name: string;
 }
 
+interface TeamItem {
+  id: string;
+  name: string;
+}
+
 interface UserListProps {
   initialUsers: UserItem[];
   tenants: TenantItem[];
+  availableTeams: TeamItem[];
 }
 
-export function UserList({ initialUsers, tenants }: UserListProps) {
-  const [searchTerm, setSearchTerm] = useState("");
+export function UserList({ initialUsers, tenants, availableTeams }: UserListProps) {
+  const { can } = usePermission();
+  const [users, setUsers] = React.useState<UserItem[]>(initialUsers);
+  const [searchTerm, setSearchTerm] = React.useState("");
+  
+  // Team Mapping Modal State
+  const [mappingUser, setMappingUser] = React.useState<UserItem | null>(null);
+  const [isMappingOpen, setIsMappingOpen] = React.useState(false);
 
-  const filteredUsers = initialUsers.filter(
+  React.useEffect(() => {
+    setUsers(initialUsers);
+  }, [initialUsers]);
+
+  const filteredUsers = users.filter(
     (user) =>
       user.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.tenantName.toLowerCase().includes(searchTerm.toLowerCase()),
+      user.tenantName.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleMapTeams = (user: UserItem) => {
+    setMappingUser(user);
+    setIsMappingOpen(true);
+  };
+
+  const columns: ColumnDef<UserItem>[] = [
+    {
+      header: "User",
+      accessorKey: "name",
+      cell: (user) => (
+        <div className="flex items-center gap-3 w-full min-w-0">
+          <Avatar className="h-9 w-9 border">
+            <AvatarFallback className="bg-primary/5 text-primary text-xs font-semibold">
+              {user.name?.substring(0, 2).toUpperCase() || "U"}
+            </AvatarFallback>
+          </Avatar>
+          <div className="flex flex-col truncate">
+            <span className="font-semibold text-sm truncate">
+              {user.name || "Unknown"}
+            </span>
+            <span className="text-xs text-muted-foreground truncate">
+              {user.email}
+            </span>
+          </div>
+        </div>
+      ),
+    },
+    {
+      header: "Role",
+      accessorKey: "role",
+      cell: (user) => (
+        <Badge variant="outline" className="capitalize bg-background">
+          {user.role.toLowerCase().replace("_", " ")}
+        </Badge>
+      ),
+    },
+    {
+      header: "Tenant",
+      accessorKey: "tenantName",
+      cell: (user) => (
+        <span className="text-sm font-medium">{user.tenantName}</span>
+      ),
+    },
+    {
+      header: "Teams part of",
+      accessorKey: "teams",
+      cell: (user) => {
+        const teamNames = user.teams?.map((t: any) => t.team.name).filter(Boolean);
+        if (!teamNames || teamNames.length === 0) return <span className="text-muted-foreground">—</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {teamNames.map((name: string, idx: number) => (
+              <Badge key={idx} variant="secondary" className="font-normal text-[10px] px-1.5 py-0 h-5">
+                {name}
+              </Badge>
+            ))}
+          </div>
+        );
+      }
+    },
+    {
+      header: "Joined",
+      accessorKey: "createdAt",
+      cell: (user) => (
+        <span className="text-sm text-muted-foreground">
+          {new Date(user.createdAt).toLocaleDateString(undefined, {
+            year: 'numeric',
+            month: 'short',
+            day: 'numeric'
+          })}
+        </span>
+      ),
+      className: "text-right hidden md:table-cell",
+    },
+    {
+      header: "",
+      accessorKey: "actions",
+      className: "w-10",
+      cell: (user) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 focus-visible:ring-0">
+              <MoreHorizontal className="h-4 w-4" />
+              <span className="sr-only">Actions</span>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={() => handleMapTeams(user)}>
+              <Users className="mr-2 h-4 w-4" />
+              Map Teams
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled>
+              <Shield className="mr-2 h-4 w-4" />
+              Change Role
+            </DropdownMenuItem>
+            <DropdownMenuItem disabled>
+              <Mail className="mr-2 h-4 w-4" />
+              Resend Invite
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive focus:bg-destructive/10 focus:text-destructive"
+              disabled={!can('DELETE', { resourceType: 'user' })}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete User
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ),
+    },
+  ];
+
   return (
-    <div className="flex-1 overflow-auto p-6">
-      <div className="flex items-center justify-between mb-6">
+    <div className="p-6 h-full flex flex-col space-y-6">
+      <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Manage Users</h1>
-          <p className="text-muted-foreground">
-            Invite users and map them to their respective tenants.
+          <h1 className="text-3xl font-bold tracking-tight">Users</h1>
+          <p className="text-muted-foreground mt-1">
+            All users who have access to the platform and their respective tenants.
           </p>
         </div>
-        <InviteUserModal tenants={tenants} />
+        {can('CREATE', { resourceType: 'user' }) && (
+          <InviteUserModal tenants={tenants} />
+        )}
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>All Platform Users</CardTitle>
-              <CardDescription>
-                Users across all organizations in the platform.
-              </CardDescription>
-            </div>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Search users..."
-                  className="pl-8 w-[250px]"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Tenant</TableHead>
-                <TableHead className="text-right">Joined</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredUsers.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={4}
-                    className="text-center h-24 text-muted-foreground"
-                  >
-                    No users found.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredUsers.map((user) => (
-                  <TableRow key={user.id}>
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <Avatar className="h-8 w-8">
-                          <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                            {user.name?.substring(0, 2).toUpperCase() || "U"}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <div className="font-semibold">
-                            {user.name || "Unknown"}
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {user.email}
-                          </div>
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="outline">{user.role}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{user.tenantName}</Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {new Date(user.createdAt).toLocaleDateString()}
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+      <div className="flex-1 bg-background rounded-lg border shadow-sm p-4">
+        <DataTable
+          data={filteredUsers}
+          columns={columns}
+          searchPlaceholder="Search users by name, email, or tenant..."
+          onSearch={setSearchTerm}
+          selectable={true}
+          emptyMessage="No users found."
+          onRowContextMenu={(e, user) => {
+            e.preventDefault();
+            handleMapTeams(user);
+          }}
+        />
+      </div>
+
+      <TeamMappingModal
+        isOpen={isMappingOpen}
+        onClose={() => setIsMappingOpen(false)}
+        user={mappingUser}
+        availableTeams={availableTeams}
+        onSuccess={() => {
+          // A real implementation would re-fetch, but since we are revalidating path in server action,
+          // the page should reload the fresh data automatically from next/cache.
+        }}
+      />
     </div>
   );
 }

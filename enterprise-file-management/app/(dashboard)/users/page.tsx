@@ -10,17 +10,19 @@ import {
 } from "@/components/ui/breadcrumb";
 import { getUsers } from "@/app/actions/users";
 import { getTenants } from "@/app/actions/tenants";
+import { getTeams } from "@/app/actions/teams";
 import { UserList } from "@/components/users/user-list";
 
 export default async function UsersPage() {
   const { data: rawUsers = [] } = await getUsers();
   const { data: rawTenants = [] } = await getTenants();
+  const { data: rawTeams = [] } = await getTeams();
 
   const users = rawUsers?.map((u: any) => ({
     ...u,
     createdAt: u.createdAt.toISOString(),
     tenantName: u.tenant?.name || "None",
-  }));
+  })) || [];
 
   const tenants =
     rawTenants?.map((t: any) => ({
@@ -28,9 +30,11 @@ export default async function UsersPage() {
       name: t.name,
     })) || [];
 
+  const teams = rawTeams || [];
+
   return (
     <>
-      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-6">
+      <header className="flex h-14 shrink-0 items-center gap-2 border-b px-6 bg-background">
         <SidebarTrigger className="-ml-2" />
         <Separator orientation="vertical" className="mr-2 h-4" />
         <Breadcrumb>
@@ -42,7 +46,9 @@ export default async function UsersPage() {
         </Breadcrumb>
       </header>
 
-      <UserList initialUsers={users || []} tenants={tenants} />
+      <div className="flex-1 overflow-auto bg-muted/10 h-full">
+        <UserList initialUsers={users} tenants={tenants} availableTeams={teams} />
+      </div>
     </>
   );
 }

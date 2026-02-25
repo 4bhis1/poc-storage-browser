@@ -3,11 +3,11 @@ import { useAuth } from '@/components/providers/AuthProvider';
 
 interface ResourceContext {
     tenantId?: string;
-    resourceType: 'bucket' | 'folder' | 'object' | 'account' | 'tenant';
+    resourceType: 'bucket' | 'folder' | 'object' | 'account' | 'tenant' | 'user' | 'team' | 'policy';
     resourceId?: string;
 }
 
-export type Action = 'READ' | 'WRITE' | 'DELETE' | 'LIST';
+export type Action = 'READ' | 'WRITE' | 'DELETE' | 'LIST' | 'CREATE';
 
 export function usePermission() {
     const { user } = useAuth();
