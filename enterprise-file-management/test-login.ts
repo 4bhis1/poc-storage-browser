@@ -7,8 +7,8 @@ const client = new CognitoIdentityProviderClient({
   credentials: fromIni({ profile: process.env.AWS_PROFILE || 'SMC-RESEARCH-DEVELOPMENT-ADMIN' }),
 });
 
-const CLIENT_ID = process.env.COGNITO_CLIENT_ID || '2tstbe7suat4m124f06selfpul';
-const CLIENT_SECRET = process.env.COGNITO_CLIENT_SECRET || '156o2erns4fjj447fa7asqh7lcp9eo145ptkd2uo9l0jf4mp7bvo';
+const CLIENT_ID = process.env.COGNITO_CLIENT_ID || '';
+const CLIENT_SECRET = process.env.COGNITO_CLIENT_SECRET || '';
 
 function generateSecretHash(userName: string): string {
   return crypto.createHmac('sha256', CLIENT_SECRET).update(userName + CLIENT_ID).digest('base64');
