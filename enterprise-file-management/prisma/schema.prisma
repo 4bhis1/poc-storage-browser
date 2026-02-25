@@ -103,6 +103,20 @@ model User {
   policies   ResourcePolicy[]
   tenant     Tenant?          @relation(fields: [tenantId], references: [id])
   teams      TeamMembership[]
+
+  // Auditing back-references (required by named relations on other models)
+  tenantsCreated    Tenant[]         @relation("TenantCreatedBy")
+  tenantsUpdated    Tenant[]         @relation("TenantUpdatedBy")
+  accountsCreated   Account[]        @relation("AccountCreatedBy")
+  accountsUpdated   Account[]        @relation("AccountUpdatedBy")
+  bucketsCreated    Bucket[]         @relation("BucketCreatedBy")
+  bucketsUpdated    Bucket[]         @relation("BucketUpdatedBy")
+  filesCreated      FileObject[]     @relation("FileObjectCreatedBy")
+  filesUpdated      FileObject[]     @relation("FileObjectUpdatedBy")
+  policiesCreated   ResourcePolicy[] @relation("PolicyCreatedBy")
+  policiesUpdated   ResourcePolicy[] @relation("PolicyUpdatedBy")
+  auditLogsCreated  AuditLog[]       @relation("AuditLogCreatedBy")
+  auditLogsUpdated  AuditLog[]       @relation("AuditLogUpdatedBy")
 }
 
 model ResourcePolicy {
@@ -118,7 +132,6 @@ model ResourcePolicy {
   updatedBy    String?
   createdByUser User?   @relation("PolicyCreatedBy", fields: [createdBy], references: [id])
   updatedByUser User?   @relation("PolicyUpdatedBy", fields: [updatedBy], references: [id])
-  user         User     @relation(fields: [userId], references: [id])
   user         User?    @relation(fields: [userId], references: [id])
   team         Team?    @relation(fields: [teamId], references: [id])
 }

@@ -51,15 +51,14 @@ const platformAdminNav = [
   { title: "Tenants", icon: Building, href: "/tenants" },
   { title: "Manage Users", icon: Users, href: "/users" },
   { title: "Buckets", icon: HardDrive, href: "/buckets" },
-  { title: "File Explorer", icon: FolderOpen, href: "/explorer" },
 ];
 
 const tenantNav = [
   { title: "Dashboard", icon: LayoutDashboard, href: "/" },
+  { title: "Buckets", icon: HardDrive, href: "/buckets" },
+  { title: "File Explorer", icon: FolderOpen, href: "/explorer" },
   { title: "Users", icon: User, href: "/users" },
   { title: "Teams", icon: Users, href: "/teams" },
-  { title: "Buckets", icon: HardDrive, href: "/buckets" },
-  { title: "Files", icon: FolderOpen, href: "/files" },
   { title: "Shares", icon: Share2, href: "/shares" },
   { title: "Audit", icon: FileText, href: "/audit" },
   { title: "Settings", icon: Settings, href: "/settings" },

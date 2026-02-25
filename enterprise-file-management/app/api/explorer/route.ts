@@ -9,11 +9,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !("tenantId" in payload)) {
+    if (!payload || typeof payload !== "object" || !payload.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const tenantId = payload.tenantId as string;
+    const email = payload.email as string;
+
+    // Look up tenantId from DB — Cognito token may not have it directly
+    const dbUser = await prisma.user.findUnique({
+      where: { email },
+      select: { tenantId: true },
+    });
+
+    if (!dbUser?.tenantId) {
+      return NextResponse.json(
+        { error: "No tenant assigned to user" },
+        { status: 403 },
+      );
+    }
+
+    const tenantId = dbUser.tenantId;
 
     const searchParams = request.nextUrl.searchParams;
     const query = searchParams.get("q");
