@@ -45,6 +45,7 @@ import { formatBytes, formatDate } from "@/lib/mock-data"
 import { SearchCommandDialog } from "@/components/search-command"
 import { useAuth } from "@/components/providers/AuthProvider"
 import { fetchWithAuth } from "@/lib/api"
+import { toast } from "sonner"
 import { FileViewer } from "@/components/file-viewer"
 
 // Extended type based on API response
@@ -153,9 +154,15 @@ export default function ExplorerPage() {
         
         setHasMore(metadata.page < metadata.totalPages)
         setPage(metadata.page)
+      } else {
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.error || "Failed to fetch files")
+        setHasMore(false)
       }
     } catch (err) {
       console.error('Failed to fetch explorer files:', err)
+      toast.error("Failed to fetch files")
+      setHasMore(false)
     } finally {
       if (pageNum === 1) setLoading(false)
       setLoadingMore(false)

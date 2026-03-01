@@ -155,6 +155,7 @@ export async function GET(
         ipAddress: clientIp,
         details: {
           shareId: share.id,
+          fileName: share.file.name,
           downloadedByEmail: share.toEmail,
           isSharedAccess: true,
         },

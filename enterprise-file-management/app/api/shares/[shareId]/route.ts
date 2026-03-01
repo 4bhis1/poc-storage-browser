@@ -3,6 +3,7 @@ import prisma from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
 import { logAudit } from "@/lib/audit";
 import { extractIpFromRequest } from "@/lib/ip-whitelist";
+import bcrypt from "bcryptjs";
 
 export async function GET(
   request: NextRequest,
@@ -126,6 +127,124 @@ export async function DELETE(
     });
   } catch (error) {
     console.error("Failed to revoke share:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PUT(
+  request: NextRequest,
+  { params }: { params: Promise<{ shareId: string }> | { shareId: string } },
+) {
+  try {
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { shareId } = await params;
+    const body = await request.json();
+    const { expiryDays, downloadLimit, password } = body;
+
+    const share = await prisma.share.findUnique({
+      where: { id: shareId },
+      include: { file: { select: { name: true } } },
+    });
+
+    if (!share) {
+      return NextResponse.json({ error: "Share not found" }, { status: 404 });
+    }
+
+    // Only allow creator or a tenant admin to update
+    if (
+      share.createdBy !== user.id &&
+      user.role !== "TENANT_ADMIN" &&
+      user.role !== "PLATFORM_ADMIN"
+    ) {
+      return NextResponse.json(
+        { error: "Forbidden: You cannot modify this share" },
+        { status: 403 },
+      );
+    }
+
+    const updateData: any = {
+      updatedBy: user.id,
+      status: "ACTIVE", // Editing it might revive an expired share if we extend dates/limits
+    };
+
+    if (expiryDays) {
+      const expiryDate = new Date();
+      expiryDate.setDate(
+        expiryDate.getDate() + parseInt(String(expiryDays), 10),
+      );
+      updateData.expiry = expiryDate;
+    }
+
+    if (downloadLimit) {
+      updateData.downloadLimit = parseInt(String(downloadLimit), 10);
+    }
+
+    if (password !== undefined) {
+      if (password && password.trim().length > 0) {
+        updateData.passwordHash = await bcrypt.hash(password.trim(), 10);
+        updateData.passwordProtected = true;
+      } else {
+        updateData.passwordHash = null;
+        updateData.passwordProtected = false;
+      }
+    }
+
+    const auditDetails: any = {
+      action: "update_settings",
+      fileId: share.fileId,
+      toEmail: share.toEmail,
+      fileName: share.file.name,
+      changes: {},
+    };
+
+    if (expiryDays)
+      auditDetails.changes.extendedExpiryDays = parseInt(
+        String(expiryDays),
+        10,
+      );
+    if (downloadLimit)
+      auditDetails.changes.newDownloadLimit = parseInt(
+        String(downloadLimit),
+        10,
+      );
+    if (password !== undefined) {
+      if (password && password.trim().length > 0) {
+        auditDetails.changes.password = "updated";
+      } else {
+        auditDetails.changes.password = "removed";
+      }
+    }
+
+    const updatedShare = await prisma.share.update({
+      where: { id: shareId },
+      data: updateData,
+    });
+
+    const clientIp = extractIpFromRequest(request);
+
+    logAudit({
+      userId: user.id,
+      action: "SHARE_UPDATED",
+      resource: "Share",
+      resourceId: share.id,
+      status: "SUCCESS",
+      ipAddress: clientIp,
+      details: auditDetails,
+    });
+
+    return NextResponse.json({
+      message: "Share updated successfully",
+      share: updatedShare,
+    });
+  } catch (error) {
+    console.error("Failed to update share:", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 },

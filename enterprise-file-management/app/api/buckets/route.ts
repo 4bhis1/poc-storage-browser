@@ -23,7 +23,11 @@ export async function GET(request: NextRequest) {
         resource: "Bucket",
         status: "FAILED",
         ipAddress: clientIp,
-        details: { reason: "IP not whitelisted for team" },
+        details: {
+          reason: "IP not whitelisted for team",
+          method: request.method,
+          path: request.nextUrl.pathname,
+        },
       });
       return NextResponse.json(
         { error: "Forbidden: IP not whitelisted for your team" },
@@ -171,7 +175,11 @@ export async function POST(request: NextRequest) {
         resource: "Bucket",
         status: "FAILED",
         ipAddress: clientIp,
-        details: { reason: "IP not whitelisted for team" },
+        details: {
+          reason: "IP not whitelisted for team",
+          method: request.method,
+          path: request.nextUrl.pathname,
+        },
       });
       return NextResponse.json(
         { error: "Forbidden: IP not whitelisted for your team" },

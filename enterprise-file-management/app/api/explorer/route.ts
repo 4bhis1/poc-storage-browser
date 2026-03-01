@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { verifyToken } from "@/lib/token";
 import { Prisma } from "@/lib/generated/prisma/client";
+import { logAudit } from "@/lib/audit";
+import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 
 export async function GET(request: NextRequest) {
   try {
@@ -20,6 +22,7 @@ export async function GET(request: NextRequest) {
     const dbUser = await prisma.user.findUnique({
       where: { email },
       select: {
+        id: true,
         tenantId: true,
         role: true,
         policies: true,
@@ -35,6 +38,26 @@ export async function GET(request: NextRequest) {
     if (!dbUser?.tenantId) {
       return NextResponse.json(
         { error: "No tenant assigned to user" },
+        { status: 403 },
+      );
+    }
+
+    const clientIp = extractIpFromRequest(request);
+    if (!validateUserIpAccess(clientIp, dbUser)) {
+      logAudit({
+        userId: dbUser.id,
+        action: "IP_ACCESS_DENIED",
+        resource: "FileObject",
+        status: "FAILED",
+        ipAddress: clientIp,
+        details: {
+          reason: "IP not whitelisted for team",
+          method: request.method,
+          path: request.nextUrl.pathname,
+        },
+      });
+      return NextResponse.json(
+        { error: "Forbidden: IP not whitelisted for your team" },
         { status: 403 },
       );
     }
@@ -298,7 +321,7 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Map to response shape ──────────────────────────────────────────────
-    const fileItems = files.map((f) => {
+    const fileItems = files.map((f: any) => {
       let type = "other";
       const lowerName = (f.name as string).toLowerCase();
       const mime = (f.mimeType as string | null) ?? "";

@@ -488,7 +488,7 @@ export default function OverviewPage() {
                     View Audit Logs
                   </Button>
                 </Link>
-                <Link href="/search" className="block">
+                <Link href="/explorer" className="block">
                   <Button
                     variant="outline"
                     className="w-full justify-start gap-2"

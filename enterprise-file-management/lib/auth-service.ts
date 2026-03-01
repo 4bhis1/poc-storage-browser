@@ -102,6 +102,28 @@ export async function authenticateCognitoUser(email: string, password: string) {
   }
 }
 
+export async function refreshCognitoToken(
+  userId: string,
+  refreshToken: string,
+) {
+  try {
+    const command = new InitiateAuthCommand({
+      AuthFlow: "REFRESH_TOKEN_AUTH",
+      ClientId: CLIENT_ID,
+      AuthParameters: {
+        REFRESH_TOKEN: refreshToken,
+        SECRET_HASH: generateSecretHash(userId),
+      },
+    });
+
+    const response = await cognitoClient.send(command);
+    return response;
+  } catch (error) {
+    console.error("Cognito Refresh Error:", error);
+    throw error;
+  }
+}
+
 import { RespondToAuthChallengeCommand } from "@aws-sdk/client-cognito-identity-provider";
 
 export async function respondToNewPasswordChallenge(

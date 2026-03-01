@@ -3,6 +3,8 @@ import prisma from "@/lib/prisma";
 import { Prisma, Role } from "@/lib/generated/prisma/client";
 import { verifyToken } from "@/lib/token";
 import { checkPermission } from "@/lib/rbac";
+import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
+import { logAudit } from "@/lib/audit";
 
 export async function GET(request: NextRequest) {
   try {
@@ -31,6 +33,26 @@ export async function GET(request: NextRequest) {
 
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    const clientIp = extractIpFromRequest(request);
+    if (!validateUserIpAccess(clientIp, user)) {
+      logAudit({
+        userId: user.id,
+        action: "IP_ACCESS_DENIED",
+        resource: "FileObject",
+        status: "FAILED",
+        ipAddress: clientIp,
+        details: {
+          reason: "IP not whitelisted for team",
+          method: request.method,
+          path: request.nextUrl.pathname,
+        },
+      });
+      return NextResponse.json(
+        { error: "Forbidden: IP not whitelisted for your team" },
+        { status: 403 },
+      );
+    }
 
     const searchParams = request.nextUrl.searchParams;
     const bucketId = searchParams.get("bucketId");

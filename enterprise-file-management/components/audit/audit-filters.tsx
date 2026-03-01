@@ -2,6 +2,8 @@
 
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Check, ChevronsUpDown } from "lucide-react";
 import { useCallback, useState, useEffect, useTransition } from "react";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -53,29 +55,89 @@ export function AuditFilters() {
     [searchParams]
   );
 
+  const [open, setOpen] = useState(false);
+
+  const ACTIONS = [
+    { value: "all", label: "All Actions", group: "General" },
+    { value: "FILE_UPLOAD", label: "File Upload", group: "File Operations" },
+    { value: "FILE_UPLOAD_INITIATED", label: "File Upload Initiated", group: "File Operations" },
+    { value: "MULTIPART_UPLOAD_INITIATED", label: "Multipart Upload", group: "File Operations" },
+    { value: "FILE_DOWNLOAD", label: "File Download", group: "File Operations" },
+    { value: "FILE_READ", label: "File Read", group: "File Operations" },
+    { value: "FILE_DELETE", label: "File Delete", group: "File Operations" },
+    { value: "FOLDER_CREATE", label: "Folder Create", group: "File Operations" },
+    { value: "FILE_SHARED", label: "File Shared", group: "Sharing & Access" },
+    { value: "SHARE_UPDATED", label: "Share Updated", group: "Sharing & Access" },
+    { value: "SHARE_REVOKED", label: "Share Revoked", group: "Sharing & Access" },
+    { value: "PERMISSION_ADDED", label: "Permission Added", group: "Sharing & Access" },
+    { value: "PERMISSION_REMOVED", label: "Permission Removed", group: "Sharing & Access" },
+    { value: "TEAM_CREATED", label: "Team Created", group: "Team Management" },
+    { value: "TEAM_UPDATED", label: "Team Updated", group: "Team Management" },
+    { value: "TEAM_DELETED", label: "Team Deleted", group: "Team Management" },
+    { value: "TEAM_MEMBER_ADDED", label: "Team Member Added", group: "Team Management" },
+    { value: "TEAM_MEMBER_REMOVED", label: "Team Member Removed", group: "Team Management" },
+    { value: "TEAM_POLICIES_UPDATED", label: "Team Policies Updated", group: "Team Management" },
+    { value: "USER_INVITED", label: "User Invited", group: "Team Management" },
+    { value: "LOGIN", label: "Login", group: "Authentication & Security" },
+    { value: "LOGOUT", label: "Logout", group: "Authentication & Security" },
+    { value: "IP_ACCESS_DENIED", label: "IP Access Denied", group: "Authentication & Security" },
+  ];
+
+  const groupedActions = ACTIONS.reduce((acc, action) => {
+    if (!acc[action.group]) acc[action.group] = [];
+    acc[action.group].push(action);
+    return acc;
+  }, {} as Record<string, typeof ACTIONS>);
+
+
   return (
     <div className="flex items-center gap-4 flex-wrap">
       <div className="flex items-center gap-2">
-        <Select
-          value={currentAction}
-          onValueChange={(val) => {
-            router.push(`${pathname}?${createQueryString("action", val)}`);
-          }}
-        >
-          <SelectTrigger className="w-[160px] h-8 text-xs">
-            <SelectValue placeholder="Filter by action" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Actions</SelectItem>
-            <SelectItem value="upload">Upload</SelectItem>
-            <SelectItem value="download">Download</SelectItem>
-            <SelectItem value="delete">Delete</SelectItem>
-            <SelectItem value="share">Share</SelectItem>
-            <SelectItem value="create_bucket">Create Bucket</SelectItem>
-            <SelectItem value="invite_user">User Activity</SelectItem>
-            <SelectItem value="sync">Sync</SelectItem>
-          </SelectContent>
-        </Select>
+        <Popover open={open} onOpenChange={setOpen}>
+          <PopoverTrigger asChild>
+            <Button
+              variant="outline"
+              role="combobox"
+              aria-expanded={open}
+              className="w-[180px] h-8 text-xs justify-between"
+            >
+              <span className="truncate">
+                 {ACTIONS.find((action) => action.value === currentAction)?.label || "Filter by action"}
+              </span>
+              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-[200px] p-0" align="start">
+            <Command>
+              <CommandInput placeholder="Search actions..." className="h-9" />
+              <CommandList>
+                <CommandEmpty>No action found.</CommandEmpty>
+                {Object.entries(groupedActions).map(([groupName, items]) => (
+                  <CommandGroup key={groupName} heading={groupName !== "General" ? groupName : undefined}>
+                    {items.map((item) => (
+                      <CommandItem
+                        key={item.value}
+                        value={item.label}
+                        onSelect={() => {
+                          setOpen(false);
+                          router.push(`${pathname}?${createQueryString("action", item.value)}`);
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            "mr-2 h-4 w-4",
+                            currentAction === item.value ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        {item.label}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                ))}
+              </CommandList>
+            </Command>
+          </PopoverContent>
+        </Popover>
 
         <Select
           value={currentTimeRange}

@@ -21,7 +21,11 @@ export async function POST(request: NextRequest) {
         resource: "Share",
         status: "FAILED",
         ipAddress: clientIp,
-        details: { reason: "IP not whitelisted for team" },
+        details: {
+          reason: "IP not whitelisted for team",
+          method: request.method,
+          path: request.nextUrl.pathname,
+        },
       });
       return NextResponse.json(
         { error: "Forbidden: IP not whitelisted for your team" },
@@ -141,10 +145,21 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const whereClause: any = {};
+
+    // Platform Admins can see everything in the system
+    if (user.role === "PLATFORM_ADMIN") {
+      // no where clause constraints
+    } else if (user.role === "TENANT_ADMIN") {
+      // Tenant Admins can see all shares within their tenant
+      whereClause.tenantId = user.tenantId;
+    } else {
+      // Teammates can only see shares they created
+      whereClause.createdBy = user.id;
+    }
+
     const shares = await prisma.share.findMany({
-      where: {
-        createdBy: user.id,
-      },
+      where: whereClause,
       include: {
         file: {
           select: {

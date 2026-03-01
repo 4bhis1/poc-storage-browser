@@ -7,6 +7,7 @@ export type AuditAction =
   | "FILE_READ"
   | "FILE_DELETE"
   | "FILE_SHARED"
+  | "SHARE_UPDATED"
   | "SHARE_REVOKED"
   | "FOLDER_CREATE"
   | "MULTIPART_UPLOAD_INITIATED"

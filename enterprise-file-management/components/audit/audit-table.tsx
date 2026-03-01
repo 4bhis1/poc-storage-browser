@@ -87,12 +87,15 @@ export function AuditTable({ logs }: { logs: any[] }) {
             const isFileEvent = resourceType === "FileObject";
 
             let targetDisplay = "-";
-            if (isFileEvent) {
-              targetDisplay = details.key || details.name || resourceId;
+            if (action === "ip_access_denied") {
+              targetDisplay = details.path ? `${details.method || ''} ${details.path}`.trim() : resourceId;
+            } else if (isFileEvent) {
+              targetDisplay = details.key || details.name || details.fileName || resourceId;
             } else {
               targetDisplay =
                 details.teamName ||
                 details.invitedEmail ||
+                details.toEmail ||
                 details.email ||
                 details.name ||
                 resourceId;
@@ -118,8 +121,12 @@ export function AuditTable({ logs }: { logs: any[] }) {
                   </TableCell>
                   <TableCell>
                     <div>
-                      <p className="text-sm font-medium">{log.user?.name || "Unknown"}</p>
-                      <p className="text-xs text-muted-foreground">{log.user?.email || "N/A"}</p>
+                      <p className="text-sm font-medium">
+                        {details.isSharedAccess ? "External User" : (log.user?.name || "Unknown")}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {details.downloadedByEmail || log.user?.email || "N/A"}
+                      </p>
                     </div>
                   </TableCell>
                   <TableCell className="hidden md:table-cell text-sm text-muted-foreground max-w-[200px] truncate" title={targetDisplay}>
@@ -128,7 +135,7 @@ export function AuditTable({ logs }: { logs: any[] }) {
                   <TableCell className="hidden lg:table-cell text-sm text-muted-foreground">
                     {(() => {
                       const rawBucket = details.bucketName || (details.bucketId ? "S3 Bucket" : resourceType);
-                      const ignoredBuckets = ["Authentication", "System", "Tenant", "ResourcePolicy", "Team", "TeamMembership", "User"];
+                      const ignoredBuckets = ["Authentication", "System", "Tenant", "ResourcePolicy", "Team", "TeamMembership", "User", "Share", "FileObject", "Bucket"];
                       return ignoredBuckets.includes(rawBucket) ? "-" : rawBucket;
                     })()}
                   </TableCell>

@@ -118,6 +118,9 @@ export async function getAuditLogs(filters?: {
         whereClause.action = { contains: "sync", mode: "insensitive" };
       else if (f === "view")
         whereClause.action = { contains: "view", mode: "insensitive" };
+      else {
+        whereClause.action = f;
+      }
     }
 
     // ── DB Query execution ──

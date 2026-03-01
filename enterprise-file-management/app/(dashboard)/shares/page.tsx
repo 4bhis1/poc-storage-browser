@@ -26,7 +26,11 @@ function SharesPageContent() {
   const [editingShare, setEditingShare] = React.useState<any>(null)
   
   // Edit Form State
-  const [editAccess, setEditAccess] = React.useState("")
+  const [editExpiryDays, setEditExpiryDays] = React.useState("7")
+  const [editDownloadLimit, setEditDownloadLimit] = React.useState("3")
+  const [editPassword, setEditPassword] = React.useState("")
+  const [removePassword, setRemovePassword] = React.useState(false)
+  const [editSaving, setEditSaving] = React.useState(false)
 
   React.useEffect(() => {
     fetchShares()
@@ -56,17 +60,52 @@ function SharesPageContent() {
 
   const handleEditClick = (share: any) => {
     setEditingShare(share)
-    setEditAccess(share.access)
-    // NOTE: Edit functionality is complex for shares since we might need to reset OTPs or change limits.
-    // For now we will allow opening the modal but the save will be a placeholder or disabled.
+    setEditExpiryDays("") // We don't easily know days remaining, so leave blank to imply "no change" or require explicit input
+    setEditDownloadLimit(share.downloadLimit?.toString() || "")
+    setEditPassword("")
+    setRemovePassword(false)
     setEditOpen(true)
   }
 
-  const handleSaveEdit = () => {
+  const handleSaveEdit = async () => {
     if (!editingShare) return
-    // Not fully supported in schema MVP without more fields, closing for now.
-    setEditOpen(false)
-    setEditingShare(null)
+    
+    setEditSaving(true)
+    try {
+      const payload: any = {}
+      if (editExpiryDays) payload.expiryDays = parseInt(editExpiryDays, 10)
+      if (editDownloadLimit) payload.downloadLimit = parseInt(editDownloadLimit, 10)
+      
+      if (editPassword) {
+        payload.password = editPassword
+      } else if (removePassword) {
+        payload.password = ""
+      }
+
+      const res = await fetch(`/api/shares/${editingShare.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setShares(prev => prev.map(s => s.id === editingShare.id ? { 
+          ...s, 
+          status: data.share.status,
+          access: data.share.passwordProtected ? "Protected Download" : "Download",
+        } : s))
+        setEditOpen(false)
+        setEditingShare(null)
+      } else {
+        alert("Failed to update share settings")
+      }
+    } catch (err) {
+      console.error(err)
+      alert("An error occurred while updating")
+    } finally {
+      setEditSaving(false)
+    }
   }
 
   const handleDelete = async (id: string) => {
@@ -147,15 +186,26 @@ function SharesPageContent() {
           </div>
 
           <div className="flex items-center justify-between gap-4">
-            <div className="relative w-full max-w-md">
+            <form 
+              autoComplete="off" 
+              onSubmit={(e) => e.preventDefault()} 
+              className="relative w-full max-w-md"
+            >
+              {/* Dummy input to trick aggressive autofillers */}
+              <input type="email" className="hidden" aria-hidden="true" tabIndex={-1} />
               <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
               <Input
+                id="share-search-input"
+                name="search"
+                type="search"
                 placeholder="Search by file name or email..."
                 className="pl-9"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                autoComplete="new-password"
+                spellCheck="false"
               />
-            </div>
+            </form>
             {/* Additional actions could go here, e.g. "Create New Share" if applicable */}
           </div>
 
@@ -171,46 +221,87 @@ function SharesPageContent() {
       </div>
 
       <GenericModal
+        key={editOpen ? `open-${editingShare?.id}` : "closed"}
         title="Edit Share Settings"
         description={`Update permissions for ${editingShare?.name}`}
         open={editOpen}
         onOpenChange={setEditOpen}
         footer={
-          <Button onClick={handleSaveEdit}>
-            Save Changes
+          <Button onClick={handleSaveEdit} disabled={editSaving}>
+            {editSaving ? "Saving..." : "Save Changes"}
           </Button>
         }
       >
-        <div className="py-4 space-y-4">
+        <form autoComplete="off" onSubmit={(e) => e.preventDefault()} className="py-4 space-y-4">
+          <input type="email" className="hidden" aria-hidden="true" tabIndex={-1} />
+          
           <div className="grid gap-2">
             <label className="text-sm font-medium">Shared With</label>
-            <Input value={editingShare?.sharedWith} disabled className="bg-slate-50 dark:bg-slate-900" />
+            <div className="flex h-10 w-full rounded-md border border-input bg-slate-50 dark:bg-slate-900 px-3 py-2 text-sm text-muted-foreground cursor-not-allowed">
+              {editingShare?.sharedWith}
+            </div>
           </div>
           
-          <div className="grid gap-3 pt-2">
-            <label className="text-sm font-medium">Access Level</label>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="view-only" 
-                checked={editAccess === 'Read Only' || editAccess === 'View'} 
-                onCheckedChange={() => setEditAccess('Read Only')} 
-              />
-              <label htmlFor="view-only" className="text-sm font-medium leading-none cursor-pointer">
-                View Only
-              </label>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Checkbox 
-                id="edit-access" 
-                checked={editAccess === 'Edit'} 
-                onCheckedChange={() => setEditAccess('Edit')} 
-              />
-              <label htmlFor="edit-access" className="text-sm font-medium leading-none cursor-pointer">
-                Edit Access
-              </label>
-            </div>
+          <div className="grid gap-2 pt-2">
+            <label className="text-sm font-medium">Update Expiry (Days from today)</label>
+            <Input 
+              type="number" 
+              min="1" 
+              max="365" 
+              placeholder="e.g. 7" 
+              value={editExpiryDays} 
+              onChange={(e) => setEditExpiryDays(e.target.value)} 
+            />
+            <p className="text-xs text-muted-foreground">Leave blank to keep existing expiration.</p>
           </div>
-        </div>
+
+          <div className="grid gap-2 pt-2">
+            <label className="text-sm font-medium">Update Download Limit</label>
+            <Input 
+              type="number" 
+              min="1" 
+              placeholder="e.g. 5" 
+              value={editDownloadLimit} 
+              onChange={(e) => setEditDownloadLimit(e.target.value)} 
+            />
+          </div>
+
+          <div className="grid gap-2 pt-2">
+            <label className="text-sm font-medium">Update Password</label>
+            <Input 
+              type="password" 
+              placeholder="Enter new password (optional)" 
+              value={editPassword} 
+              disabled={removePassword}
+              onChange={(e) => setEditPassword(e.target.value)} 
+              autoComplete="new-password"
+              spellCheck="false"
+            />
+            {editingShare?.access === "Protected Download" && (
+              <div className="flex items-center space-x-2 pt-1">
+                <Checkbox 
+                  id="remove-password" 
+                  checked={removePassword} 
+                  onCheckedChange={(checked: boolean | "indeterminate") => {
+                    setRemovePassword(checked === true)
+                    if (checked === true) setEditPassword("")
+                  }} 
+                />
+                <label
+                  htmlFor="remove-password"
+                  className="text-xs font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70"
+                >
+                  Remove existing password requirement
+                </label>
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              {editingShare?.access === "Protected Download" 
+                ? "Leave empty to keep existing password." 
+                : "Leave empty to keep share unprotected."}
+            </p>
+          </div>
+        </form>
       </GenericModal>
     </>
   )

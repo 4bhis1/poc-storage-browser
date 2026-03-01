@@ -111,10 +111,13 @@ export default function BucketsPage() {
         setHasMore(metadata.page < metadata.totalPages)
         setPage(metadata.page)
       } else {
-        toast.error("Failed to fetch buckets")
+        const errData = await res.json().catch(() => ({}));
+        toast.error(errData.error || "Failed to fetch buckets")
+        setHasMore(false) // Stop infinite scrolling on error
       }
     } catch (error) {
       toast.error("Failed to fetch buckets")
+      setHasMore(false) // Stop infinite scrolling on error
     } finally {
       setLoading(false)
       setLoadingMore(false)
