@@ -111,6 +111,60 @@ const alb = new awsx.lb.ApplicationLoadBalancer("app-alb", {
   ],
 });
 
+// IAM Role for the ECS Task
+const taskRole = new aws.iam.Role("app-task-role", {
+  assumeRolePolicy: JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Action: "sts:AssumeRole",
+        Principal: {
+          Service: "ecs-tasks.amazonaws.com",
+        },
+        Effect: "Allow",
+        Sid: "",
+      },
+    ],
+  }),
+});
+
+// Attach policies necessary for the app (e.g., S3 and Cognito)
+const s3PolicyAttachment = new aws.iam.RolePolicyAttachment(
+  "app-task-role-s3",
+  {
+    role: taskRole.name,
+    policyArn: "arn:aws:iam::aws:policy/AmazonS3FullAccess",
+  },
+);
+
+const cognitoPolicyAttachment = new aws.iam.RolePolicyAttachment(
+  "app-task-role-cognito",
+  {
+    role: taskRole.name,
+    policyArn: "arn:aws:iam::aws:policy/AmazonCognitoPowerUser",
+  },
+);
+
+// SNS Topic for Share Notifications
+const snsTopic = new aws.sns.Topic("fms-share-notifications");
+
+const snsSubscription = new aws.sns.TopicSubscription(
+  "fms-share-notifications-sub",
+  {
+    topic: snsTopic.arn,
+    protocol: "email",
+    endpoint: "absk8634@gmail.com",
+  },
+);
+
+const snsPolicyAttachment = new aws.iam.RolePolicyAttachment(
+  "app-task-role-sns",
+  {
+    role: taskRole.name,
+    policyArn: "arn:aws:iam::aws:policy/AmazonSNSFullAccess",
+  },
+);
+
 // Fargate Cluster
 const cluster = new aws.ecs.Cluster("app-cluster");
 
@@ -118,6 +172,9 @@ const cluster = new aws.ecs.Cluster("app-cluster");
 const service = new awsx.ecs.FargateService("app-svc", {
   cluster: cluster.arn,
   taskDefinitionArgs: {
+    taskRole: {
+      roleArn: taskRole.arn,
+    },
     container: {
       name: "app",
       image: image.imageUri,
@@ -168,16 +225,8 @@ const service = new awsx.ecs.FargateService("app-svc", {
           value: process.env.OAUTH_CLIENT_SECRET || "",
         },
         {
-          name: "AWS_ACCESS_KEY_ID",
-          value: process.env.AWS_ACCESS_KEY_ID || "",
-        },
-        {
-          name: "AWS_SECRET_ACCESS_KEY",
-          value: process.env.AWS_SECRET_ACCESS_KEY || "",
-        },
-        {
-          name: "AWS_SESSION_TOKEN",
-          value: process.env.AWS_SESSION_TOKEN || "",
+          name: "SNS_SHARE_NOTIFICATIONS_TOPIC_ARN",
+          value: snsTopic.arn,
         },
       ],
     },

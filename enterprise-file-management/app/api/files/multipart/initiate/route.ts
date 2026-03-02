@@ -88,7 +88,7 @@ export async function POST(request: NextRequest) {
       resource: "FileObject",
       status: "SUCCESS",
       ipAddress: extractIpFromRequest(request),
-      details: { bucketId: bucket.id, key },
+      details: { bucketId: bucket.id, bucketName: bucket.name, key },
     });
 
     return NextResponse.json({ uploadId: UploadId, key });

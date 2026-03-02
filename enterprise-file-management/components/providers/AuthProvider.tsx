@@ -34,7 +34,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
-    const pendingRedirect = useRef<string | null>(null);
 
     const logout = useCallback(async () => {
         // Clear server-side httpOnly cookies
@@ -142,23 +141,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
 
-    // Navigate only AFTER user state is committed to React — avoids sidebar flash
-    useEffect(() => {
-        if (user && pendingRedirect.current) {
-            const path = pendingRedirect.current;
-            pendingRedirect.current = null;
-            router.push(path);
-        }
-    }, [user, router]);
-
     const login = (token: string, userData: User, redirectPath: string = '/') => {
         // Store token client-side for JWT decode / expiry checks
         localStorage.setItem('accessToken', token);
         localStorage.setItem('user', JSON.stringify(userData));
-        // Set user first, then navigate after React commits the state update
-        pendingRedirect.current = redirectPath;
         setUser(userData);
         // Note: the login API already set accessToken + refreshToken as httpOnly cookies
+        window.location.href = redirectPath;
     };
 
     return (

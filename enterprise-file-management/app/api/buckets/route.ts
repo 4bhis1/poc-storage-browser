@@ -112,14 +112,14 @@ export async function GET(request: NextRequest) {
       orderBy: { createdAt: "desc" },
       take: limit,
       skip: skip,
-      include: { _count: { select: { objects: true } } },
     });
 
     const bucketsWithStats = await Promise.all(
       buckets.map(async (bucket) => {
         const stats = await prisma.fileObject.aggregate({
-          where: { bucketId: bucket.id },
+          where: { bucketId: bucket.id, isFolder: false },
           _sum: { size: true },
+          _count: { id: true },
         });
         return {
           id: bucket.id,
@@ -131,7 +131,7 @@ export async function GET(request: NextRequest) {
           encryption: bucket.encryption,
           totalSize: Number(stats._sum.size ?? 0),
           maxSize: Number(bucket.quotaBytes),
-          fileCount: bucket._count.objects,
+          fileCount: stats._count.id,
           tags: bucket.tags,
           createdAt: bucket.createdAt.toISOString(),
         };
@@ -236,11 +236,12 @@ export async function POST(request: NextRequest) {
 
     if (
       !process.env.AWS_PROFILE &&
+      !process.env.AWS_ACCESS_KEY_ID &&
       (!account.awsAccessKeyId || !account.awsSecretAccessKey)
     ) {
       return NextResponse.json(
         {
-          error: `AWS profile environment variable is not configured, and account "${account.name}" has no credentials. Please configure AWS_PROFILE or add credentials.`,
+          error: `AWS credentials not found. Please configure AWS_PROFILE/AWS_ACCESS_KEY_ID or add credentials to the account "${account.name}".`,
         },
         { status: 422 },
       );
@@ -297,20 +298,8 @@ export async function POST(request: NextRequest) {
         HeadBucketCommand,
       } = await import("@aws-sdk/client-s3");
 
-      let s3ClientConfig: any = { region };
-      if (account.awsAccessKeyId && account.awsSecretAccessKey) {
-        s3ClientConfig.credentials = {
-          accessKeyId: decrypt(account.awsAccessKeyId),
-          secretAccessKey: decrypt(account.awsSecretAccessKey),
-        };
-      } else if (process.env.AWS_PROFILE) {
-        const { fromIni } = await import("@aws-sdk/credential-providers");
-        s3ClientConfig.credentials = fromIni({
-          profile: process.env.AWS_PROFILE,
-        });
-      }
-
-      const s3 = new S3Client(s3ClientConfig);
+      const { getS3Client } = await import("@/lib/s3");
+      const s3 = getS3Client(account, region);
 
       if (isExisting) {
         // Verify the bucket exists and we have access
@@ -408,6 +397,16 @@ export async function POST(request: NextRequest) {
         { status: 500 },
       );
     }
+
+    logAudit({
+      userId: user.id,
+      action: "BUCKET_CREATE" as any,
+      resource: "Bucket",
+      resourceId: bucket.id,
+      status: "SUCCESS",
+      ipAddress: extractIpFromRequest(request),
+      details: { bucketName: finalBucketName, region, isExisting },
+    });
 
     return NextResponse.json(
       {

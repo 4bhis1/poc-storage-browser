@@ -147,7 +147,7 @@ export async function GET(request: NextRequest) {
       resource: "FileObject",
       status: "SUCCESS",
       ipAddress: extractIpFromRequest(request),
-      details: { bucketId: bucket.id, key, action },
+      details: { bucketId: bucket.id, bucketName: bucket.name, key, action },
     });
 
     return NextResponse.json({ url, key });

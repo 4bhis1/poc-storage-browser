@@ -90,20 +90,34 @@ export async function GET(request: NextRequest) {
     // Upsert user in db
     let user;
     try {
-      user = await prisma.user.upsert({
+      let existingUser = await prisma.user.findUnique({
         where: { email },
-        update: { hasLoggedIn: true },
-        create: {
-          email,
-          role: defaultRole as any,
-          hasLoggedIn: true,
-        },
-        include: {
-          teams: {
-            include: { team: true },
-          },
-        },
       });
+
+      if (existingUser) {
+        user = await prisma.user.update({
+          where: { email },
+          data: { hasLoggedIn: true },
+          include: {
+            teams: {
+              include: { team: true },
+            },
+          },
+        });
+      } else {
+        user = await prisma.user.create({
+          data: {
+            email,
+            role: defaultRole as any,
+            hasLoggedIn: true,
+          },
+          include: {
+            teams: {
+              include: { team: true },
+            },
+          },
+        });
+      }
 
       const clientIp = extractIpFromRequest(request);
       if (!validateUserIpAccess(clientIp, user)) {
@@ -136,7 +150,7 @@ export async function GET(request: NextRequest) {
       name: "accessToken",
       value: idToken,
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: false,
       sameSite: "strict",
       path: "/",
       maxAge: 60 * 60,
@@ -147,7 +161,7 @@ export async function GET(request: NextRequest) {
         name: "refreshToken",
         value: refreshToken,
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: false,
         sameSite: "strict",
         path: "/",
         maxAge: 60 * 60 * 24 * 7,

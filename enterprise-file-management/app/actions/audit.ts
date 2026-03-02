@@ -174,7 +174,9 @@ export async function getAuditLogs(filters?: {
     const enrichedLogs = logs.map((log: any) => {
       if (log.details?.bucketId) {
         log.details.bucketName =
-          bucketMap.get(log.details.bucketId) || "Unknown Bucket";
+          bucketMap.get(log.details.bucketId) ||
+          log.details.bucketName ||
+          "Unknown Bucket";
       }
       return log;
     });

@@ -280,7 +280,7 @@ export async function POST(request: NextRequest) {
           resource: "FileObject",
           resourceId: file.id,
           status: "SUCCESS",
-          details: { bucketId: bucket.id, key, size },
+          details: { bucketId: bucket.id, bucketName: bucket.name, key, size },
         });
       }
     } else {
@@ -306,7 +306,7 @@ export async function POST(request: NextRequest) {
           resource: "FileObject",
           resourceId: file.id,
           status: "SUCCESS",
-          details: { name, bucketId, key },
+          details: { name, bucketId, bucketName: bucket.name, key },
         });
       } else {
         logAudit({
@@ -315,7 +315,7 @@ export async function POST(request: NextRequest) {
           resource: "FileObject",
           resourceId: file.id,
           status: "SUCCESS",
-          details: { bucketId: bucket.id, key, size },
+          details: { bucketId: bucket.id, bucketName: bucket.name, key, size },
         });
       }
     }

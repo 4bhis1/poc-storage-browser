@@ -10,6 +10,7 @@ import { GlobalUploadIndicator } from '@/components/global-upload-indicator'
 import { DownloadProvider } from '@/components/providers/download-provider'
 import { GlobalDownloadIndicator } from '@/components/global-download-indicator'
 import { UserPreferencesProvider } from '@/components/providers/user-preferences-provider'
+import { getCurrentUser } from '@/lib/session'
 
 const _geist = Geist({ subsets: ["latin"] });
 const _geistMono = Geist_Mono({ subsets: ["latin"] });
@@ -21,13 +22,32 @@ export const metadata: Metadata = {
   description: 'Secure multi-tenant file management powered by S3',
 }
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode
 }>) {
+  const user = await getCurrentUser()
+
+  const defaultPreferences = {
+    themeMode: 'system',
+    themeColor: 'blue',
+    themeFont: 'inter',
+    themeRadius: '0.3',
+  }
+
+  const prefs = {
+    themeMode: user?.themeMode || defaultPreferences.themeMode,
+    themeColor: user?.themeColor || defaultPreferences.themeColor,
+    themeFont: user?.themeFont || defaultPreferences.themeFont,
+    themeRadius: user?.themeRadius || defaultPreferences.themeRadius,
+  }
+
+  const radiusClass = `radius-${prefs.themeRadius.replace('.', '-')}`
+  const themeClasses = `theme-${prefs.themeColor} font-${prefs.themeFont} ${radiusClass}`
+
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning className={themeClasses}>
       <body className={`font-sans antialiased ${inter.variable} ${manrope.variable}`}>
         <ThemeProvider
           attribute="class"
@@ -36,7 +56,7 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <UserPreferencesProvider>
+            <UserPreferencesProvider initialPreferences={prefs}>
               <UploadProvider>
                 <DownloadProvider>
                   {children}

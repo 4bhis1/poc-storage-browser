@@ -60,27 +60,49 @@ export async function POST(request: NextRequest) {
 
     let user;
     try {
-      user = await prisma.user.upsert({
+      // Find the user first to avoid overwriting existing roles with defaultRole
+      let existingUser = await prisma.user.findUnique({
         where: { email: cleanEmail },
-        update: { hasLoggedIn: true },
-        create: {
-          email: cleanEmail,
-          role: defaultRole as any,
-          hasLoggedIn: true,
-        },
-        include: {
-          policies: true,
-          teams: {
-            include: {
-              team: {
-                include: {
-                  policies: true,
+      });
+
+      if (existingUser) {
+        user = await prisma.user.update({
+          where: { email: cleanEmail },
+          data: { hasLoggedIn: true },
+          include: {
+            policies: true,
+            teams: {
+              include: {
+                team: {
+                  include: {
+                    policies: true,
+                  },
                 },
               },
             },
           },
-        },
-      });
+        });
+      } else {
+        user = await prisma.user.create({
+          data: {
+            email: cleanEmail,
+            role: defaultRole as any,
+            hasLoggedIn: true,
+          },
+          include: {
+            policies: true,
+            teams: {
+              include: {
+                team: {
+                  include: {
+                    policies: true,
+                  },
+                },
+              },
+            },
+          },
+        });
+      }
     } catch (prismaErr) {
       console.error("Local user sync err:", prismaErr);
     }
@@ -119,7 +141,7 @@ export async function POST(request: NextRequest) {
       name: "accessToken",
       value: authResult.IdToken || "",
       httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
+      secure: false,
       sameSite: "strict",
       path: "/",
       maxAge: 60 * 60,
@@ -130,7 +152,7 @@ export async function POST(request: NextRequest) {
         name: "refreshToken",
         value: authResult.RefreshToken,
         httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
+        secure: false,
         sameSite: "strict",
         path: "/",
         maxAge: 60 * 60 * 24 * 7,

@@ -59,6 +59,8 @@ export function AuditFilters() {
 
   const ACTIONS = [
     { value: "all", label: "All Actions", group: "General" },
+    { value: "BUCKET_CREATE", label: "Bucket Create", group: "Storage Management" },
+    { value: "BUCKET_DELETE", label: "Bucket Delete", group: "Storage Management" },
     { value: "FILE_UPLOAD", label: "File Upload", group: "File Operations" },
     { value: "FILE_UPLOAD_INITIATED", label: "File Upload Initiated", group: "File Operations" },
     { value: "MULTIPART_UPLOAD_INITIATED", label: "Multipart Upload", group: "File Operations" },

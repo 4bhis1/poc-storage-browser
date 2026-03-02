@@ -1,22 +1,29 @@
-import { Pool } from 'pg'
-import { PrismaPg } from '@prisma/adapter-pg'
-import { PrismaClient } from './generated/prisma/client'
+import { Pool } from "pg";
+import { PrismaPg } from "@prisma/adapter-pg";
+import { PrismaClient } from "./generated/prisma/client";
 
-const connectionString = `${process.env.DATABASE_URL}`
+const connectionString = `${process.env.DATABASE_URL}`;
 
 const prismaClientSingleton = () => {
-  const pool = new Pool({ connectionString })
-  const adapter = new PrismaPg(pool)
+  const pool = new Pool({
+    connectionString,
+    // AWS RDS requires SSL. We bypass strict cert verification for the POC.
+    ssl:
+      process.env.NODE_ENV === "production"
+        ? { rejectUnauthorized: false }
+        : undefined,
+  });
+  const adapter = new PrismaPg(pool);
   // @ts-ignore: Adapter property might be missing in generated types but valid at runtime
-  return new PrismaClient({ adapter })
-}
+  return new PrismaClient({ adapter });
+};
 
 declare global {
-  var prisma: undefined | ReturnType<typeof prismaClientSingleton>
+  var prisma: undefined | ReturnType<typeof prismaClientSingleton>;
 }
 
-const prisma = prismaClientSingleton()
+const prisma = prismaClientSingleton();
 
-export default prisma
+export default prisma;
 
-if (process.env.NODE_ENV !== 'production') globalThis.prisma = prisma
+if (process.env.NODE_ENV !== "production") globalThis.prisma = prisma;

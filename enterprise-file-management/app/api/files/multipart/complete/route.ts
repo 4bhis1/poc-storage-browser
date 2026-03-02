@@ -119,7 +119,7 @@ export async function POST(request: NextRequest) {
       resourceId: fileRecord.id,
       status: "SUCCESS",
       ipAddress: extractIpFromRequest(request),
-      details: { bucketId: bucket.id, key, size },
+      details: { bucketId: bucket.id, bucketName: bucket.name, key, size },
     });
 
     return NextResponse.json({

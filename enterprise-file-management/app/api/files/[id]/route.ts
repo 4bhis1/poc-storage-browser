@@ -143,7 +143,11 @@ export async function DELETE(
       resourceId: file.id,
       status: "SUCCESS",
       ipAddress: extractIpFromRequest(request),
-      details: { bucketId: file.bucket.id, key: file.key },
+      details: {
+        bucketId: file.bucket.id,
+        bucketName: file.bucket.name,
+        key: file.key,
+      },
     });
 
     return NextResponse.json({ success: true });

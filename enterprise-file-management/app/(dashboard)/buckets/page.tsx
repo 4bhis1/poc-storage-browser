@@ -82,6 +82,8 @@ export default function BucketsPage() {
   const [syncing, setSyncing] = React.useState<string | null>(null)
   const [importSyncPromptOpen, setImportSyncPromptOpen] = React.useState(false)
   const [importedBucketId, setImportedBucketId] = React.useState<string | null>(null)
+  const [bucketToDelete, setBucketToDelete] = React.useState<any>(null)
+  const [isDeleting, setIsDeleting] = React.useState(false)
 
   const canCreate = can('WRITE', { resourceType: 'bucket' })
 
@@ -167,6 +169,27 @@ export default function BucketsPage() {
       setSyncing(null)
     }
   }
+
+  const handleDeleteBucket = async () => {
+    if (!bucketToDelete) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetchWithAuth(`/api/buckets/${bucketToDelete.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast.success("Bucket deleted successfully");
+        setPage(1);
+        fetchBuckets(1, true);
+        setBucketToDelete(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Failed to delete bucket");
+      }
+    } catch (error) {
+      toast.error("Failed to delete bucket");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const handleCreateBucket = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -294,7 +317,10 @@ export default function BucketsPage() {
             </DropdownMenuItem>
             
             {can('LIST', { resourceType: 'bucket', resourceId: bucket.id }) && (
-              <DropdownMenuItem onClick={() => handleSync(bucket.id)} disabled={syncing === bucket.id}>
+              <DropdownMenuItem onClick={(e) => {
+                e.stopPropagation();
+                handleSync(bucket.id);
+              }} disabled={syncing === bucket.id}>
                 <RefreshCw className={`mr-2 h-4 w-4 ${syncing === bucket.id ? 'animate-spin' : ''}`} /> Force Sync Files
               </DropdownMenuItem>
             )}
@@ -306,6 +332,10 @@ export default function BucketsPage() {
             <DropdownMenuItem 
               className="text-destructive focus:bg-destructive/10 focus:text-destructive"
               disabled={!can('DELETE', { resourceType: 'bucket', resourceId: bucket.id })}
+              onClick={(e) => {
+                e.stopPropagation();
+                setBucketToDelete(bucket);
+              }}
             >
               <Trash2 className="mr-2 h-4 w-4" /> Delete Bucket
             </DropdownMenuItem>
@@ -450,6 +480,28 @@ export default function BucketsPage() {
               setImportSyncPromptOpen(false)
               if (importedBucketId) handleSync(importedBucketId)
             }}>Yes, Sync Now</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!bucketToDelete} onOpenChange={(open) => !open && setBucketToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Bucket</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete the bucket <span className="font-semibold">{bucketToDelete?.name}</span>?
+              This will permanently remove the bucket from your AWS account and cannot be undone.
+              <br/><br/>
+              <span className="font-medium text-destructive">Note: The bucket must be completely empty before it can be deleted.</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex justify-end gap-3 mt-4">
+            <Button variant="outline" onClick={() => setBucketToDelete(null)} disabled={isDeleting}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDeleteBucket} disabled={isDeleting}>
+              {isDeleting && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+              Delete Bucket
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -89,37 +89,8 @@ export async function GET(
     }
 
     // 4. Generate Presigned URL
-    let s3ClientConfig: any = { region: share.bucket.region };
-
-    if (
-      share.bucket.account.awsAccessKeyId &&
-      share.bucket.account.awsSecretAccessKey
-    ) {
-      s3ClientConfig.credentials = {
-        accessKeyId: decrypt(share.bucket.account.awsAccessKeyId),
-        secretAccessKey: decrypt(share.bucket.account.awsSecretAccessKey),
-        ...(share.bucket.account.awsSessionToken && {
-          sessionToken: decrypt(share.bucket.account.awsSessionToken),
-        }),
-      };
-    } else if (
-      process.env.AWS_ACCESS_KEY_ID &&
-      process.env.AWS_SECRET_ACCESS_KEY
-    ) {
-      s3ClientConfig.credentials = {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-        ...(process.env.AWS_SESSION_TOKEN && {
-          sessionToken: process.env.AWS_SESSION_TOKEN,
-        }),
-      };
-    } else if (process.env.AWS_PROFILE) {
-      s3ClientConfig.credentials = fromIni({
-        profile: process.env.AWS_PROFILE,
-      });
-    }
-
-    const s3 = new S3Client(s3ClientConfig);
+    const { getS3Client } = await import("@/lib/s3");
+    const s3 = getS3Client(share.bucket.account, share.bucket.region);
     const command = new GetObjectCommand({
       Bucket: share.bucket.name,
       Key: share.file.key,

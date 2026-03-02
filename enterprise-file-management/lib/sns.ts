@@ -3,10 +3,7 @@ import { SNSClient, PublishCommand } from "@aws-sdk/client-sns";
 const REGION = process.env.AWS_REGION || "ap-south-1";
 
 // Singleton SNS client (only initialized if we have credentials or are in an AWS environment)
-const snsClient =
-  process.env.AWS_ACCESS_KEY_ID || process.env.AWS_PROFILE
-    ? new SNSClient({ region: REGION })
-    : null;
+const snsClient = new SNSClient({ region: REGION });
 
 export async function sendShareEmailNotification({
   toEmail,

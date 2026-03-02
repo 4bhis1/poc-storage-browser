@@ -19,9 +19,6 @@ const CLIENT_SECRET =
 
 export const cognitoClient = new CognitoIdentityProviderClient({
   region: REGION,
-  credentials: fromIni({
-    profile: process.env.AWS_PROFILE || "SMC-RESEARCH-DEVELOPMENT-ADMIN",
-  }),
 });
 
 export function generateSecretHash(userName: string): string {
