@@ -56,6 +56,14 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -141,6 +149,9 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
   const [fileToShare, setFileToShare] = React.useState<any>(null)
   const [viewerOpen, setViewerOpen] = React.useState(false)
   const [fileToView, setFileToView] = React.useState<any>(null)
+  const [page, setPage] = React.useState(1)
+  const [pagination, setPagination] = React.useState<any>(null)
+  const limit = 10
 
   const currentParentId = path.length > 0 ? path[path.length - 1].id : null
 
@@ -156,14 +167,20 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
       params.append('bucketId', bucketId)
       if (currentParentId) params.append('parentId', currentParentId)
       if (searchQuery) params.append('search', searchQuery)
+      params.append('page', page.toString())
+      params.append('limit', limit.toString())
+      params.append('sortBy', sortKey)
+      params.append('sortOrder', sortOrder)
 
       const res = await fetchWithAuth(`/api/file-explorer?${params.toString()}`)
       if (res.ok) {
         const data = await res.json()
         if (data.files) {
           setFiles(data.files)
+          setPagination(data.pagination)
         } else {
           setFiles([])
+          setPagination(null)
         }
       } else {
         toast.error("Failed to fetch files")
@@ -173,7 +190,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
     } finally {
       setLoading(false)
     }
-  }, [bucketId, currentParentId, searchQuery])
+  }, [bucketId, currentParentId, searchQuery, page, limit, sortKey, sortOrder])
 
   // Permission Check
   // We can check permissions on a per-file basis using the file's bucketId
@@ -188,47 +205,26 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
   React.useEffect(() => {
     fetchFiles()
     setSelected(new Set())
-  }, [fetchFiles, refreshTrigger, searchQuery])
+  }, [fetchFiles, refreshTrigger, searchQuery, page, sortKey, sortOrder])
 
   // Sorting
-  const currentFiles = React.useMemo(() => {
-    return [...files].sort((a, b) => {
-      // Folders always first
-      if (a.type === "folder" && b.type !== "folder") return -1
-      if (a.type !== "folder" && b.type === "folder") return 1
-      
-      let modifier = sortOrder === "asc" ? 1 : -1
-
-      switch (sortKey) {
-        case "name":
-          return a.name.localeCompare(b.name) * modifier
-        case "size":
-          return ((a.size || 0) - (b.size || 0)) * modifier
-        case "modifiedAt":
-          return (
-            new Date(a.modifiedAt).getTime() -
-            new Date(b.modifiedAt).getTime()
-          ) * modifier
-        case "owner":
-          return (a.owner || '').localeCompare(b.owner || '') * modifier
-        default:
-          return 0
-      }
-    })
-  }, [files, sortKey, sortOrder])
+  const currentFiles = files; // Sorting is now done on the backend
 
   const navigateToFolder = (folder: { id: string, name: string, breadcrumbs?: { id: string, name: string }[] }) => {
     if (folder.breadcrumbs && folder.breadcrumbs.length > 0) {
       setPath(folder.breadcrumbs)
       setSearchQuery("")
+      setPage(1)
     } else {
       setPath([...path, { id: folder.id, name: folder.name }])
       setSearchQuery("")
+      setPage(1)
     }
   }
 
   const navigateToBreadcrumb = (index: number) => {
     setPath(path.slice(0, index))
+    setPage(1)
   }
 
   const toggleSelect = (id: string) => {
@@ -472,7 +468,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
               variant="ghost"
               size="icon"
               className="h-8 w-8 rounded-r-none border-r"
-              onClick={() => setSortOrder(sortOrder === "asc" ? "desc" : "asc")}
+              onClick={() => { setSortOrder(sortOrder === "asc" ? "desc" : "asc"); setPage(1); }}
               title={`Sort ${sortOrder === "asc" ? "Descending" : "Ascending"}`}
             >
               <ArrowUpDown className={`h-4 w-4 ${sortOrder === "desc" ? "rotate-180" : ""} transition-transform`} />
@@ -480,7 +476,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
             </Button>
             <Select
               value={sortKey}
-              onValueChange={(v) => setSortKey(v as SortKey)}
+              onValueChange={(v: string) => { setSortKey(v as SortKey); setPage(1); }}
             >
               <SelectTrigger className="w-[120px] h-8 text-xs border-0 rounded-l-none focus:ring-0">
                 <SelectValue />
@@ -542,7 +538,7 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
       </div>
 
       <div className="w-full max-w-sm">
-        <SearchInput value={searchQuery} onChange={setSearchQuery} />
+        <SearchInput value={searchQuery} onChange={(v: string) => { setSearchQuery(v); setPage(1); }} />
       </div>
 
       {/* Selected count */}
@@ -744,6 +740,44 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
           )}
         </div>
       )}
+
+      {/* Pagination Controls */}
+      {!loading && pagination && pagination.totalPages >= 1 && currentFiles.length > 0 && (
+        <div className="py-4 border-t border-border mt-4">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (pagination.currentPage > 1) setPage(pagination.currentPage - 1);
+                  }}
+                  href="#"
+                  size="default"
+                  className={pagination.currentPage <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <span className="text-sm text-muted-foreground mx-4">
+                  Page {pagination.currentPage} of {pagination.totalPages}
+                </span>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (pagination.currentPage < pagination.totalPages) setPage(pagination.currentPage + 1);
+                  }}
+                  href="#"
+                  size="default"
+                  className={pagination.currentPage >= pagination.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
+      )}
+
       {/* Rename Dialog */}
       <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
         <DialogContent>

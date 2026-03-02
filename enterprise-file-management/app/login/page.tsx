@@ -88,7 +88,11 @@ export default function LoginPage() {
                         }
                     }
                 } else {
-                    setError(data.error || 'Login failed');
+                    if (res.status === 403 && data.error === 'IP_BLOCKED') {
+                        router.push('/ip-blocked');
+                    } else {
+                        setError(data.error || 'Login failed');
+                    }
                 }
             }
         } catch(err) {

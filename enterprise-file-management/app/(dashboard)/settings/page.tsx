@@ -30,6 +30,7 @@ import { mockOrganization, mockUsers } from "@/lib/mock-data"
 import { SearchCommandDialog } from "@/components/search-command"
 import { AwsAccountSettings } from "@/components/settings/aws-account-settings"
 import { useAuth } from "@/components/providers/AuthProvider"
+import { AppearanceSettings } from "@/components/settings/appearance-settings"
 
 export default function SettingsPage() {
   const { user } = useAuth()
@@ -60,14 +61,20 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          <Tabs defaultValue="profile" className="space-y-6">
+          <Tabs defaultValue="appearance" className="space-y-6">
             <TabsList>
+              <TabsTrigger value="appearance">Appearance</TabsTrigger>
               <TabsTrigger value="profile">Profile</TabsTrigger>
+              <TabsTrigger value="notifications">Notifications</TabsTrigger>
+              <TabsTrigger value="security">Security</TabsTrigger>
               <TabsTrigger value="organization">Organization</TabsTrigger>
               <TabsTrigger value="cloud">Cloud Integrations</TabsTrigger>
-              <TabsTrigger value="security">Security</TabsTrigger>
-              <TabsTrigger value="preferences">Preferences</TabsTrigger>
             </TabsList>
+
+            {/* Appearance */}
+            <TabsContent value="appearance" className="space-y-6">
+              <AppearanceSettings />
+            </TabsContent>
 
             {/* Profile */}
             <TabsContent value="profile" className="space-y-6">
@@ -328,31 +335,8 @@ export default function SettingsPage() {
               <AwsAccountSettings />
             </TabsContent>
 
-            {/* Preferences */}
-            <TabsContent value="preferences" className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Appearance</CardTitle>
-                  <CardDescription>
-                    Customize how CloudVault looks on your device.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-1.5">
-                    <Label>Theme</Label>
-                    <Select defaultValue="dark">
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="light">Light</SelectItem>
-                        <SelectItem value="dark">Dark</SelectItem>
-                        <SelectItem value="system">System</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </CardContent>
-              </Card>
+            {/* Notifications */}
+            <TabsContent value="notifications" className="space-y-6">
 
               <Card>
                 <CardHeader>

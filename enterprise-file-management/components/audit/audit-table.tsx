@@ -22,6 +22,21 @@ import {
   Download,
 } from "lucide-react";
 import { formatDateTime } from "@/lib/mock-data";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 
 const actionIcons: Record<string, React.ElementType> = {
   upload: Upload,
@@ -47,11 +62,16 @@ const actionColors: Record<string, string> = {
   sync: "bg-teal-500/10 text-teal-600 dark:text-teal-400",
 };
 
-export function AuditTable({ logs }: { logs: any[] }) {
-  const [expandedRows, setExpandedRows] = React.useState<Record<string, boolean>>({});
+export function AuditTable({ logs, pagination }: { logs: any[], pagination?: any }) {
+  const [selectedLog, setSelectedLog] = React.useState<any | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
-  const toggleRow = (id: string) => {
-    setExpandedRows((prev) => ({ ...prev, [id]: !prev[id] }));
+  const handlePageChange = (newPage: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("page", newPage.toString());
+    router.push(`${pathname}?${params.toString()}`);
   };
 
   return (
@@ -108,7 +128,7 @@ export function AuditTable({ logs }: { logs: any[] }) {
               <React.Fragment key={log.id}>
                 <TableRow
                   className="cursor-pointer hover:bg-muted/50 transition-colors"
-                  onClick={() => toggleRow(log.id)}
+                  onClick={() => setSelectedLog(log)}
                 >
                   <TableCell>
                     <Badge
@@ -146,17 +166,6 @@ export function AuditTable({ logs }: { logs: any[] }) {
                     {formatDateTime(new Date(log.createdAt).toISOString())}
                   </TableCell>
                 </TableRow>
-                {expandedRows[log.id] && (
-                  <TableRow className="bg-muted/20">
-                    <TableCell colSpan={6} className="p-0 border-b-0">
-                      <div className="p-4 bg-muted/30 inner-shadow text-xs overflow-x-auto">
-                        <pre className="font-mono text-muted-foreground whitespace-pre-wrap m-0">
-                          {JSON.stringify(details, null, 2).replace(/^{|}$/g, "") || "No details available"}
-                        </pre>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
               </React.Fragment>
             );
           })}
@@ -169,6 +178,110 @@ export function AuditTable({ logs }: { logs: any[] }) {
           )}
         </TableBody>
       </Table>
+      
+      <Dialog open={!!selectedLog} onOpenChange={(open: boolean) => !open && setSelectedLog(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Audit Log Details</DialogTitle>
+          </DialogHeader>
+          {selectedLog && (
+            <div className="mt-4 flex flex-col gap-6 overflow-hidden">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 shrink-0 overflow-y-auto sm:overflow-visible">
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground mb-1">Action</h4>
+                  <Badge variant="secondary" className="capitalize">
+                    {selectedLog.action.replace(/_/g, " ")}
+                  </Badge>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground mb-1">Timestamp</h4>
+                  <p className="text-sm font-medium text-foreground">
+                    {formatDateTime(new Date(selectedLog.createdAt).toISOString())}
+                  </p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground mb-1">User</h4>
+                  <p className="text-sm font-medium text-foreground">
+                    {selectedLog.user?.name || "Unknown"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {selectedLog.user?.email || "No email available"}
+                  </p>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-muted-foreground mb-1">IP Address</h4>
+                  <p className="text-sm font-mono text-foreground">
+                    {selectedLog.ipAddress || (selectedLog.details && selectedLog.details.ip) || "System"}
+                  </p>
+                </div>
+                {selectedLog.resource && (
+                  <div className="col-span-1 sm:col-span-2">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Resource</h4>
+                    <p className="text-sm font-mono text-foreground">{selectedLog.resource}</p>
+                  </div>
+                )}
+                {selectedLog.resourceId && (
+                  <div className="col-span-1 sm:col-span-2">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Resource ID</h4>
+                    <p className="text-sm font-mono text-foreground">{selectedLog.resourceId}</p>
+                  </div>
+                )}
+                {selectedLog.status && (
+                  <div className="col-span-1 sm:col-span-2">
+                    <h4 className="text-sm font-medium text-muted-foreground mb-1">Status</h4>
+                    <Badge variant={selectedLog.status === "SUCCESS" ? "default" : "destructive"}>
+                      {selectedLog.status}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+              
+              <div className="border-t pt-4 flex flex-col min-h-0 overflow-hidden">
+                <h4 className="text-sm font-medium text-muted-foreground mb-2 shrink-0">Payload Details</h4>
+                <div className="bg-muted p-4 rounded-md overflow-auto text-xs text-foreground font-mono flex-1">
+                  <pre>{JSON.stringify(selectedLog.details || {}, null, 2)}</pre>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {pagination && pagination.totalPages >= 1 && logs.length > 0 && (
+        <div className="py-4 border-t border-border mt-4">
+          <Pagination>
+            <PaginationContent>
+              <PaginationItem>
+                <PaginationPrevious 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (pagination.currentPage > 1) handlePageChange(pagination.currentPage - 1);
+                  }}
+                  href="#"
+                  size="default"
+                  className={pagination.currentPage <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+              <PaginationItem>
+                <span className="text-sm text-muted-foreground mx-4">
+                  Page {pagination.currentPage} of {pagination.totalPages}
+                </span>
+              </PaginationItem>
+              <PaginationItem>
+                <PaginationNext 
+                  onClick={(e) => {
+                    e.preventDefault();
+                    if (pagination.currentPage < pagination.totalPages) handlePageChange(pagination.currentPage + 1);
+                  }}
+                  href="#"
+                  size="default"
+                  className={pagination.currentPage >= pagination.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                />
+              </PaginationItem>
+            </PaginationContent>
+          </Pagination>
+        </div>
+      )}
     </div>
   );
 }

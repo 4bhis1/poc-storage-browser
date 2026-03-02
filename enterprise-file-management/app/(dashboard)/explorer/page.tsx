@@ -47,6 +47,13 @@ import { useAuth } from "@/components/providers/AuthProvider"
 import { fetchWithAuth } from "@/lib/api"
 import { toast } from "sonner"
 import { FileViewer } from "@/components/file-viewer"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
 
 // Extended type based on API response
 export type FileType = "folder" | "pdf" | "image" | "document" | "spreadsheet" | "archive" | "video" | "audio" | "code" | "other"
@@ -94,10 +101,8 @@ export default function ExplorerPage() {
   const [activeFilters, setActiveFilters] = React.useState<Set<FileType>>(new Set())
   const [files, setFiles] = React.useState<ApiFileItem[]>([])
   const [loading, setLoading] = React.useState(true)
-  const [loadingMore, setLoadingMore] = React.useState(false)
   const [page, setPage] = React.useState(1)
-  const [hasMore, setHasMore] = React.useState(true)
-  const observerTarget = React.useRef(null)
+  const [totalPages, setTotalPages] = React.useState(1)
   const [debounceTimeout, setDebounceTimeout] = React.useState<NodeJS.Timeout | null>(null)
   
   const [teammates, setTeammates] = React.useState<{id: string, name: string, email: string}[]>([])
@@ -121,10 +126,9 @@ export default function ExplorerPage() {
     fetchTeammates()
   }, [])
 
-  const fetchFiles = React.useCallback(async (pageNum: number, searchQuery: string, filters: Set<FileType>, creatorId: string, isNewFilter: boolean = false) => {
+  const fetchFiles = React.useCallback(async (pageNum: number, searchQuery: string, filters: Set<FileType>, creatorId: string) => {
     try {
-      if (pageNum === 1) setLoading(true)
-      else setLoadingMore(true)
+      setLoading(true)
       
       const token = localStorage.getItem('accessToken');
       if (!token) return;
@@ -139,67 +143,40 @@ export default function ExplorerPage() {
       }
 
       url.searchParams.append('page', pageNum.toString())
-      url.searchParams.append('limit', '20')
+      url.searchParams.append('limit', '10')
       
       const res = await fetchWithAuth(url.toString())
       if (res.ok) {
         const result = await res.json()
         const { data, metadata } = result
         
-        if (isNewFilter || pageNum === 1) {
-          setFiles(data)
-        } else {
-          setFiles(prev => [...prev, ...data])
-        }
-        
-        setHasMore(metadata.page < metadata.totalPages)
+        setFiles(data)
+        setTotalPages(metadata.totalPages)
         setPage(metadata.page)
       } else {
         const errData = await res.json().catch(() => ({}));
         toast.error(errData.error || "Failed to fetch files")
-        setHasMore(false)
+        setFiles([])
+        setTotalPages(0)
       }
     } catch (err) {
       console.error('Failed to fetch explorer files:', err)
       toast.error("Failed to fetch files")
-      setHasMore(false)
+      setFiles([])
+      setTotalPages(0)
     } finally {
-      if (pageNum === 1) setLoading(false)
-      setLoadingMore(false)
+      setLoading(false)
     }
   }, [])
 
   React.useEffect(() => {
     if (debounceTimeout) clearTimeout(debounceTimeout)
     const timeout = setTimeout(() => {
-      setPage(1)
-      fetchFiles(1, query, activeFilters, filterCreator, true)
+      fetchFiles(page, query, activeFilters, filterCreator)
     }, 300)
     setDebounceTimeout(timeout)
     return () => clearTimeout(timeout)
-  }, [query, activeFilters, filterCreator, fetchFiles])
-
-  React.useEffect(() => {
-    const observer = new IntersectionObserver(
-      entries => {
-        if (entries[0].isIntersecting && hasMore && !loading && !loadingMore) {
-          const nextPage = page + 1
-          fetchFiles(nextPage, query, activeFilters, filterCreator)
-        }
-      },
-      { threshold: 1.0 }
-    )
-
-    if (observerTarget.current) {
-      observer.observe(observerTarget.current)
-    }
-
-    return () => {
-      if (observerTarget.current) {
-        observer.unobserve(observerTarget.current)
-      }
-    }
-  }, [hasMore, loading, loadingMore, page, query, activeFilters, filterCreator, fetchFiles])
+  }, [page, query, activeFilters, filterCreator, fetchFiles])
 
   const toggleFilter = (type: FileType) => {
     setActiveFilters((prev) => {
@@ -296,6 +273,7 @@ export default function ExplorerPage() {
                   onClick={() => {
                     setActiveFilters(new Set())
                     setFilterCreator("ALL")
+                    setPage(1)
                   }}
                 >
                   Clear filters
@@ -381,12 +359,41 @@ export default function ExplorerPage() {
                 </p>
               </div>
             )}
-
-            <div ref={observerTarget} className="h-4 w-full" />
             
-            {loadingMore && (
-              <div className="text-center py-4">
-                <RefreshCw className="h-6 w-6 animate-spin mx-auto text-primary" />
+            {/* Pagination Controls */}
+            {totalPages >= 1 && files.length > 0 && (
+              <div className="py-4 border-t border-border mt-4">
+                <Pagination>
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (page > 1) setPage(page - 1);
+                        }}
+                        href="#"
+                        size="default"
+                        className={page <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                    <PaginationItem>
+                      <span className="text-sm text-muted-foreground mx-4">
+                        Page {page} of {totalPages}
+                      </span>
+                    </PaginationItem>
+                    <PaginationItem>
+                      <PaginationNext 
+                        onClick={(e) => {
+                          e.preventDefault();
+                          if (page < totalPages) setPage(page + 1);
+                        }}
+                        href="#"
+                        size="default"
+                        className={page >= totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
               </div>
             )}
           </div>

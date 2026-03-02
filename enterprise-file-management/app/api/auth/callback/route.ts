@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { jwtDecode } from "jwt-decode";
 import prisma from "@/lib/prisma";
 import { logAudit } from "@/lib/audit";
-import { extractIpFromRequest } from "@/lib/ip-whitelist";
+import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -98,7 +98,25 @@ export async function GET(request: NextRequest) {
           role: defaultRole as any,
           hasLoggedIn: true,
         },
+        include: {
+          teams: {
+            include: { team: true },
+          },
+        },
       });
+
+      const clientIp = extractIpFromRequest(request);
+      if (!validateUserIpAccess(clientIp, user)) {
+        logAudit({
+          userId: user.id,
+          action: "IP_ACCESS_DENIED",
+          resource: "Authentication",
+          status: "FAILED",
+          ipAddress: clientIp,
+          details: { reason: "IP not whitelisted for team during SSO login" },
+        });
+        return NextResponse.redirect(new URL("/ip-blocked", request.url));
+      }
 
       logAudit({
         userId: user.id,

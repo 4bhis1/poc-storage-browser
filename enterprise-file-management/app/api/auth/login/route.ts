@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { authenticateCognitoUser } from "@/lib/auth-service";
 import { logAudit } from "@/lib/audit";
-import { extractIpFromRequest } from "@/lib/ip-whitelist";
+import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 
 export async function POST(request: NextRequest) {
   try {
@@ -83,6 +83,24 @@ export async function POST(request: NextRequest) {
       });
     } catch (prismaErr) {
       console.error("Local user sync err:", prismaErr);
+    }
+
+    if (user) {
+      const clientIp = extractIpFromRequest(request);
+      if (!validateUserIpAccess(clientIp, user)) {
+        logAudit({
+          userId: user.id,
+          action: "IP_ACCESS_DENIED",
+          resource: "Authentication",
+          status: "FAILED",
+          ipAddress: clientIp,
+          details: {
+            reason: "IP not whitelisted for team during login",
+            method: "PASSWORD",
+          },
+        });
+        return NextResponse.json({ error: "IP_BLOCKED" }, { status: 403 });
+      }
     }
 
     const responseBody = {

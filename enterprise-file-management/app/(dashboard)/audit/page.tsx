@@ -81,9 +81,12 @@ export default async function AuditPage(props: {
   const timeRange = typeof searchParams.timeRange === 'string' ? searchParams.timeRange : undefined;
   const dateFrom = typeof searchParams.dateFrom === 'string' ? searchParams.dateFrom : undefined;
   const dateTo = typeof searchParams.dateTo === 'string' ? searchParams.dateTo : undefined;
+  const pageParam = typeof searchParams.page === 'string' ? searchParams.page : '1';
+  const page = parseInt(pageParam, 10) || 1;
 
-  const result = await getAuditLogs({ action, timeRange, dateFrom, dateTo });
+  const result = await getAuditLogs({ action, timeRange, dateFrom, dateTo, page, limit: 10 });
   const logs = result.success ? (result.data as any[]) : [];
+  const pagination = result.success ? (result as any).pagination : null;
 
   return (
     <>
@@ -118,7 +121,7 @@ export default async function AuditPage(props: {
                 <ExportCsvButton logs={logs} />
               </div>
 
-              <AuditTable logs={logs} />
+              <AuditTable logs={logs} pagination={pagination} />
            
         </div>
       </div>

@@ -16,11 +16,20 @@ import { Search, Edit, Trash2, Shield, Eye, CalendarClock } from "lucide-react"
 import { GenericModal } from "@/components/ui/generic-modal"
 import { Suspense } from "react"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination"
 
 function SharesPageContent() {
   const [searchQuery, setSearchQuery] = React.useState("")
   const [shares, setShares] = React.useState<any[]>([])
   const [loading, setLoading] = React.useState(true)
+  const [page, setPage] = React.useState(1)
+  const [pagination, setPagination] = React.useState<any>(null)
   
   const [editOpen, setEditOpen] = React.useState(false)
   const [editingShare, setEditingShare] = React.useState<any>(null)
@@ -33,16 +42,17 @@ function SharesPageContent() {
   const [editSaving, setEditSaving] = React.useState(false)
 
   React.useEffect(() => {
-    fetchShares()
-  }, [])
+    fetchShares(page)
+  }, [page])
 
-  const fetchShares = async () => {
+  const fetchShares = async (currentPage: number) => {
     try {
       setLoading(true)
-      const res = await fetch("/api/shares")
-      const data = await res.json()
+      const res = await fetch(`/api/shares?page=${page}&limit=10`)
       if (res.ok) {
-        setShares(data)
+        const data = await res.json()
+        setShares(data.shares || [])
+        setPagination(data.pagination || null)
       }
     } catch (err) {
       console.error("Failed to fetch shares:", err)
@@ -52,11 +62,17 @@ function SharesPageContent() {
   }
 
   const filteredShares = React.useMemo(() => {
+    if (!searchQuery) return shares;
     return shares.filter(share => 
       share.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
       share.sharedWith.toLowerCase().includes(searchQuery.toLowerCase())
     )
   }, [shares, searchQuery])
+
+  // Reset page when search query changes to ensure users see relevant results from page 1
+  React.useEffect(() => {
+    if (searchQuery) setPage(1);
+  }, [searchQuery]);
 
   const handleEditClick = (share: any) => {
     setEditingShare(share)
@@ -216,6 +232,42 @@ function SharesPageContent() {
               emptyMessage="No shared files match your search." 
             />
           </div>
+
+          {!loading && pagination && pagination.totalPages >= 1 && shares.length > 0 && (
+            <div className="py-4 border-t border-border mt-4">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (pagination.currentPage > 1) setPage(pagination.currentPage - 1);
+                      }}
+                      href="#"
+                      size="default"
+                      className={pagination.currentPage <= 1 ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                  <PaginationItem>
+                    <span className="text-sm text-muted-foreground mx-4">
+                      Page {pagination.currentPage} of {pagination.totalPages}
+                    </span>
+                  </PaginationItem>
+                  <PaginationItem>
+                    <PaginationNext 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        if (pagination.currentPage < pagination.totalPages) setPage(pagination.currentPage + 1);
+                      }}
+                      href="#"
+                      size="default"
+                      className={pagination.currentPage >= pagination.totalPages ? "pointer-events-none opacity-50" : "cursor-pointer"}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
+          )}
 
         </div>
       </div>

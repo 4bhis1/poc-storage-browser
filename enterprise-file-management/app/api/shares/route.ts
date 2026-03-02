@@ -145,6 +145,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const page = parseInt(searchParams.get("page") || "1", 10);
+    const limit = parseInt(searchParams.get("limit") || "10", 10);
+    const skip = (page - 1) * limit;
+
     const whereClause: any = {};
 
     // Platform Admins can see everything in the system
@@ -158,19 +163,24 @@ export async function GET(request: NextRequest) {
       whereClause.createdBy = user.id;
     }
 
-    const shares = await prisma.share.findMany({
-      where: whereClause,
-      include: {
-        file: {
-          select: {
-            name: true,
+    const [totalCount, shares] = await Promise.all([
+      prisma.share.count({ where: whereClause }),
+      prisma.share.findMany({
+        where: whereClause,
+        include: {
+          file: {
+            select: {
+              name: true,
+            },
           },
         },
-      },
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+        orderBy: {
+          createdAt: "desc",
+        },
+        skip,
+        take: limit,
+      }),
+    ]);
 
     const formattedShares = shares.map((share: any) => ({
       id: share.id,
@@ -186,7 +196,15 @@ export async function GET(request: NextRequest) {
             : share.status,
     }));
 
-    return NextResponse.json(formattedShares);
+    return NextResponse.json({
+      shares: formattedShares,
+      pagination: {
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page,
+        limit,
+      },
+    });
   } catch (error) {
     console.error("Failed to fetch shares:", error);
     return NextResponse.json(

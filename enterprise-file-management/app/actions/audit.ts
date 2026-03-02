@@ -10,12 +10,18 @@ export async function getAuditLogs(filters?: {
   timeRange?: string;
   dateFrom?: string;
   dateTo?: string;
+  page?: number;
+  limit?: number;
 }) {
   try {
     const user = await getCurrentUser();
     if (!user) {
       return { success: false, error: "Unauthorized" };
     }
+
+    const page = filters?.page || 1;
+    const limit = filters?.limit || 10;
+    const skip = (page - 1) * limit;
 
     const whereClause: any = {};
 
@@ -124,14 +130,18 @@ export async function getAuditLogs(filters?: {
     }
 
     // ── DB Query execution ──
-    const dbLogs = await prisma.auditLog.findMany({
-      where: whereClause,
-      include: {
-        user: { select: { name: true, email: true } },
-      },
-      orderBy: { createdAt: "desc" },
-      take: 100, // Now directly taking 100 correctly filtered records
-    });
+    const [totalCount, dbLogs] = await Promise.all([
+      prisma.auditLog.count({ where: whereClause }),
+      prisma.auditLog.findMany({
+        where: whereClause,
+        include: {
+          user: { select: { name: true, email: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: limit,
+      }),
+    ]);
 
     // Parse details string into JSON
     const logs = dbLogs.map((log: any) => {
@@ -169,7 +179,16 @@ export async function getAuditLogs(filters?: {
       return log;
     });
 
-    return { success: true, data: enrichedLogs };
+    return {
+      success: true,
+      data: enrichedLogs,
+      pagination: {
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page,
+        limit,
+      },
+    };
   } catch (error) {
     console.error("Failed to fetch audit logs:", error);
     return { success: false, error: "Failed to fetch audit logs" };

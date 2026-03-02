@@ -97,7 +97,7 @@ export async function GET(request: NextRequest) {
         if (allowedBucketIdFilter.length === 0) {
           return NextResponse.json({
             data: [],
-            metadata: { total: 0, page: 1, limit: 20, totalPages: 0 },
+            metadata: { total: 0, page: 1, limit: 10, totalPages: 0 },
           });
         }
       }
@@ -109,7 +109,7 @@ export async function GET(request: NextRequest) {
     const createdBy = searchParams.get("createdBy");
     const typesParam = searchParams.get("types");
     const page = parseInt(searchParams.get("page") || "1");
-    const limit = parseInt(searchParams.get("limit") || "50");
+    const limit = parseInt(searchParams.get("limit") || "10");
     const skip = (page - 1) * limit;
 
     // ── Build type-filter mime conditions (shared between both paths) ──────

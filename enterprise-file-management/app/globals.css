@@ -115,6 +115,51 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
+/* --- Theme Overrides --- */
+/* Colors */
+.theme-zinc { --primary: oklch(0.27 0.01 285); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.27 0.01 285); }
+.dark.theme-zinc, .dark .theme-zinc { --primary: oklch(0.98 0 0); --primary-foreground: oklch(0.1 0 0); --ring: oklch(0.98 0 0); }
+
+.theme-slate { --primary: oklch(0.32 0.03 260); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.32 0.03 260); }
+.dark.theme-slate, .dark .theme-slate { --primary: oklch(0.94 0.01 260); --primary-foreground: oklch(0.1 0 0); --ring: oklch(0.94 0.01 260); }
+
+.theme-stone { --primary: oklch(0.32 0.01 70); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.32 0.01 70); }
+.dark.theme-stone, .dark .theme-stone { --primary: oklch(0.93 0.01 70); --primary-foreground: oklch(0.1 0 0); --ring: oklch(0.93 0.01 70); }
+
+.theme-red { --primary: oklch(0.6 0.25 25); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.6 0.25 25); }
+.dark.theme-red, .dark .theme-red { --primary: oklch(0.6 0.25 25); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.6 0.25 25); }
+
+.theme-orange { --primary: oklch(0.65 0.2 50); --primary-foreground: oklch(0.1 0 0); --ring: oklch(0.65 0.2 50); }
+.dark.theme-orange, .dark .theme-orange { --primary: oklch(0.65 0.2 50); --primary-foreground: oklch(0.1 0 0); --ring: oklch(0.65 0.2 50); }
+
+.theme-green { --primary: oklch(0.65 0.2 150); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.65 0.2 150); }
+.dark.theme-green, .dark .theme-green { --primary: oklch(0.65 0.2 150); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.65 0.2 150); }
+
+.theme-blue { --primary: oklch(0.55 0.19 255); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.55 0.19 255); }
+.dark.theme-blue, .dark .theme-blue { --primary: oklch(0.6 0.2 255); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.6 0.2 255); }
+
+.theme-rose { --primary: oklch(0.6 0.23 10); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.6 0.23 10); }
+.dark.theme-rose, .dark .theme-rose { --primary: oklch(0.6 0.23 10); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.6 0.23 10); }
+
+.theme-violet { --primary: oklch(0.52 0.2 300); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.52 0.2 300); }
+.dark.theme-violet, .dark .theme-violet { --primary: oklch(0.52 0.2 300); --primary-foreground: oklch(0.98 0 0); --ring: oklch(0.52 0.2 300); }
+
+.theme-yellow { --primary: oklch(0.75 0.18 90); --primary-foreground: oklch(0.1 0 0); --ring: oklch(0.75 0.18 90); }
+.dark.theme-yellow, .dark .theme-yellow { --primary: oklch(0.75 0.18 90); --primary-foreground: oklch(0.1 0 0); --ring: oklch(0.75 0.18 90); }
+
+/* Fonts */
+.font-inter { --font-sans: var(--font-inter), "Geist", "Geist Fallback", sans-serif; }
+.font-manrope { --font-sans: var(--font-manrope), "Geist", "Geist Fallback", sans-serif; }
+.font-system { --font-sans: system-ui, sans-serif; }
+
+/* Border Radius */
+.radius-0 { --radius: 0rem; }
+.radius-0-3 { --radius: 0.3rem; }
+.radius-0-5 { --radius: 0.5rem; }
+.radius-0-75 { --radius: 0.75rem; }
+.radius-1 { --radius: 1rem; }
+/* --- End Theme Overrides --- */
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

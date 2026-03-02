@@ -58,6 +58,14 @@ export async function GET(request: NextRequest) {
     const bucketId = searchParams.get("bucketId");
     const parentId = searchParams.get("parentId");
     const search = searchParams.get("search");
+    const pageParam = searchParams.get("page") || "1";
+    const limitParam = searchParams.get("limit") || "10";
+    const sortBy = searchParams.get("sortBy") || "name";
+    const sortOrder = searchParams.get("sortOrder") || "asc";
+
+    const page = parseInt(pageParam, 10) || 1;
+    const limit = parseInt(limitParam, 10) || 10;
+    const skip = (page - 1) * limit;
 
     let allowedBucketIds: string[] = [];
 
@@ -139,7 +147,7 @@ export async function GET(request: NextRequest) {
             ${keyPrefix ? Prisma.sql`AND key LIKE ${keyPrefix + "%"}` : Prisma.empty}
         `,
       );
-      const matchingIds = ftsResults.map((r) => r.id);
+      const matchingIds = ftsResults.map((r: { id: string }) => r.id);
 
       if (matchingIds.length === 0) {
         return NextResponse.json({ files: [] });
@@ -151,21 +159,31 @@ export async function GET(request: NextRequest) {
       whereClause.parentId = parentId || null;
     }
 
-    const files = await prisma.fileObject.findMany({
-      where: whereClause,
-      orderBy: {
-        isFolder: "desc",
-      },
-      include: {
-        children: true,
-      },
-    });
+    let orderByClause: any[] = [{ isFolder: "desc" }];
+    if (sortBy === "name") orderByClause.push({ name: sortOrder });
+    else if (sortBy === "size") orderByClause.push({ size: sortOrder });
+    else if (sortBy === "modifiedAt")
+      orderByClause.push({ updatedAt: sortOrder });
+    else if (sortBy === "owner") orderByClause.push({ owner: sortOrder });
+
+    const [totalCount, files] = await Promise.all([
+      prisma.fileObject.count({ where: whereClause }),
+      prisma.fileObject.findMany({
+        where: whereClause,
+        orderBy: orderByClause,
+        skip,
+        take: limit,
+        include: {
+          children: true,
+        },
+      }),
+    ]);
 
     // Fetch all ancestor folders if search is active
     let folderBreadcrumbsData = new Map<string, { id: string; name: string }>();
     if (search && search.trim() !== "" && files.length > 0) {
       const ancestorKeys = new Set<string>();
-      files.forEach((f) => {
+      files.forEach((f: any) => {
         const parts = f.key.split("/");
         let currentKey = "";
         const bound = f.isFolder ? parts.length : parts.length - 1;
@@ -184,13 +202,13 @@ export async function GET(request: NextRequest) {
           },
           select: { id: true, name: true, key: true },
         });
-        ancestors.forEach((a) =>
+        ancestors.forEach((a: any) =>
           folderBreadcrumbsData.set(a.key, { id: a.id, name: a.name }),
         );
       }
     }
 
-    const fileItems = files.map((f) => {
+    const fileItems = files.map((f: any) => {
       let breadcrumbs: { id: string; name: string }[] | undefined = undefined;
       if (search && search.trim() !== "") {
         breadcrumbs = [];
@@ -224,11 +242,19 @@ export async function GET(request: NextRequest) {
         path: f.key,
         key: f.key,
         breadcrumbs,
-        children: f.children.map((c) => ({ id: c.id })),
+        children: f.children.map((c: any) => ({ id: c.id })),
       };
     });
 
-    return NextResponse.json({ files: fileItems });
+    return NextResponse.json({
+      files: fileItems,
+      pagination: {
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        currentPage: page,
+        limit,
+      },
+    });
   } catch (error) {
     console.error("File explorer error:", error);
     return NextResponse.json(

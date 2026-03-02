@@ -18,6 +18,7 @@ const publicPaths = [
   "/api/auth/callback",
   "/api/shares",
   "/file/share",
+  "/ip-blocked",
 ];
 
 export async function proxy(request: NextRequest) {
