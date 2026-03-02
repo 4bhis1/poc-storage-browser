@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import prisma from "@/lib/prisma";
 import { verifyToken } from "@/lib/token";
+import { logAudit } from "@/lib/audit";
+import { extractIpFromRequest } from "@/lib/ip-whitelist";
 import { decrypt } from "@/lib/encryption";
 import {
   S3Client,
@@ -22,8 +24,17 @@ export async function POST(
 
     const payload = await verifyToken(token);
     // @ts-ignore
-    if (!payload)
+    if (!payload || !payload.email)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const user = await prisma.user.findUnique({
+      where: { email: payload.email as string },
+      select: { id: true },
+    });
+
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
 
     // Fetch bucket with account details
     const bucket = await prisma.bucket.findUnique({
@@ -206,6 +217,16 @@ export async function POST(
     console.log(
       `[BucketSync] Completed sync for ${bucket.name}. Synced ${syncedFilesCount} files.`,
     );
+
+    logAudit({
+      userId: user.id,
+      action: "BUCKET_SYNC" as any,
+      resource: "Bucket",
+      resourceId: bucket.id,
+      status: "SUCCESS",
+      ipAddress: extractIpFromRequest(request),
+      details: { bucketName: bucket.name, syncedFiles: syncedFilesCount },
+    });
 
     return NextResponse.json({
       bucket: {
