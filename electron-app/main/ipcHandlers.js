@@ -3,6 +3,7 @@ const path = require('path');
 const backend = require('../backend');
 const cognito = require('../backend/cognito');
 const authManager = require('../backend/auth');
+const botAuth = require('../backend/bot-auth');
 
 function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
     // 1. Local File Handling
@@ -317,12 +318,114 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
         }
     });
 
+    // ── SSO: PKCE loopback flow ─────────────────────────────────────────────
     ipcMain.handle('auth:open-browser-sso', async () => {
+        const { generatePKCE, startLoopbackServer } = require('../backend/pkce');
+        const axios = require('axios');
         const enterpriseUrl = process.env.ENTERPRISE_URL || 'http://localhost:3000';
-        await shell.openExternal(`${enterpriseUrl}/api/auth/agent-sso`);
+
+        try {
+            const { verifier, challenge } = generatePKCE();
+            const { port, codePromise }   = await startLoopbackServer();
+            const redirectUri = `http://127.0.0.1:${port}`;
+
+            const ssoUrl = `${enterpriseUrl}/api/auth/agent-sso?challenge=${challenge}&redirect_uri=${encodeURIComponent(redirectUri)}`;
+            await shell.openExternal(ssoUrl);
+
+            // Wait for the loopback to receive the auth code
+            const code = await codePromise;
+
+            // Exchange code + verifier for tokens
+            const { data } = await axios.post(`${enterpriseUrl}/api/auth/token-exchange`, {
+                code,
+                verifier,
+            });
+
+            const { accessToken, refreshToken, email } = data;
+            authManager.login({
+                accessToken,
+                idToken:      accessToken,
+                refreshToken,
+                username:     email,
+                email,
+            });
+
+            // Start heartbeat in SSO mode
+            const heartbeat = require('../backend/heartbeat');
+            heartbeat.start('sso', () => {
+                if (mainWindow) mainWindow.webContents.send('auth-expired');
+            });
+
+            if (mainWindow) {
+                mainWindow.webContents.send('sso-auth-result', { idToken: accessToken, refreshToken, email });
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.focus();
+            }
+
+            return { success: true };
+        } catch (err) {
+            console.error('[IPC] auth:open-browser-sso error:', err.message);
+            return { success: false, error: err.message };
+        }
+    });
+
+    // ── Bot auth handlers ───────────────────────────────────────────────────
+
+    ipcMain.handle('bot:generate-keypair', () => {
+        try {
+            const publicKey = botAuth.generateKeyPair();
+            return { success: true, publicKey };
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('bot:get-public-key', () => {
+        return { publicKey: botAuth.getPublicKey(), hasKeyPair: botAuth.hasKeyPair() };
+    });
+
+    ipcMain.handle('bot:save-bot-id', (event, { botId }) => {
+        botAuth.saveBotId(botId);
+        return { success: true };
+    });
+
+    ipcMain.handle('bot:get-bot-id', () => {
+        return { botId: botAuth.getBotId() };
+    });
+
+    ipcMain.handle('bot:handshake', async (event, { botId }) => {
+        try {
+            const result = await botAuth.performHandshake(botId);
+            authManager.login({
+                accessToken:  result.accessToken,
+                idToken:      result.accessToken,
+                refreshToken: result.refreshToken,
+                username:     result.email,
+                email:        result.email,
+            });
+
+            // Start heartbeat in bot mode
+            const heartbeat = require('../backend/heartbeat');
+            heartbeat.start('bot', () => {
+                if (mainWindow) mainWindow.webContents.send('auth-expired');
+            });
+
+            return { success: true, accessToken: result.accessToken, email: result.email };
+        } catch (err) {
+            console.error('[IPC] bot:handshake error:', err.message);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('bot:deregister', () => {
+        botAuth.clearBotIdentity();
+        authManager.logout();
+        const heartbeat = require('../backend/heartbeat');
+        heartbeat.stop();
         return { success: true };
     });
 }
+
 
 module.exports = { registerIpcHandlers };
 

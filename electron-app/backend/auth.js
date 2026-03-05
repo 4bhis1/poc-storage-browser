@@ -44,7 +44,6 @@ class AuthManager {
     console.log('[AuthManager] Tokens saved to store for:', store.get('email'));
     this._scheduleRefresh(result.idToken);
   }
-
   /**
    * Use the stored refreshToken to get a new accessToken + idToken from Cognito.
    * @returns {{ success, accessToken, idToken }}

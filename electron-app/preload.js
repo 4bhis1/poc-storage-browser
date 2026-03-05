@@ -97,5 +97,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.on('sso-auth-result', sub);
       return () => ipcRenderer.removeListener('sso-auth-result', sub);
     },
-  }
+  },
+
+  // 9. Bot Auth
+  bot: {
+    generateKeyPair: ()         => ipcRenderer.invoke('bot:generate-keypair'),
+    getPublicKey:    ()         => ipcRenderer.invoke('bot:get-public-key'),
+    saveBotId:       (botId)    => ipcRenderer.invoke('bot:save-bot-id', { botId }),
+    getBotId:        ()         => ipcRenderer.invoke('bot:get-bot-id'),
+    handshake:       (botId)    => ipcRenderer.invoke('bot:handshake', { botId }),
+    deregister:      ()         => ipcRenderer.invoke('bot:deregister'),
+  },
 });

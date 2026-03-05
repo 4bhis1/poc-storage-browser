@@ -1,0 +1,13 @@
+Things to do 
+add error handling in case if DB is not connected
+
+
+==============
+
+
+The flow
+
+Web-Application (enterprise-file-managment)
+    BOT/SYSTEM-LOGIN :
+        In parallel to Teams in collabotation tab add a Agent tab above the Team Tab
+        Here want to follow Secretless Machin to machine authentication

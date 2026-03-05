@@ -168,6 +168,28 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    /**
+     * Bot handshake login — calls the IPC bot:handshake handler which
+     * signs a JWT with the local private key and exchanges it for tokens.
+     */
+    const loginAsBot = async (botId) => {
+        try {
+            const result = await window.electronAPI.bot.handshake(botId);
+            if (!result.success) {
+                return { success: false, error: result.error || 'Handshake failed' };
+            }
+            setToken(result.accessToken);
+            const decoded = _decodeUser(result.accessToken);
+            setUser({ ...decoded, email: result.email || decoded.email });
+            window.electronAPI.initSync?.(result.accessToken);
+            try { await window.electronAPI.syncBucketsNow?.(); } catch {}
+            navigate('/');
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message || 'Bot login failed' };
+        }
+    };
+
     const logout = async () => {
         await window.electronAPI?.auth?.logout?.();
         window.electronAPI?.stopSync?.();
@@ -179,6 +201,7 @@ export const AuthProvider = ({ children }) => {
         token,
         user,
         login,
+        loginAsBot,
         logout,
         submitNewPassword,
         isAuthenticated: !!token,

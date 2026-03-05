@@ -3,6 +3,7 @@
 import {
   AudioWaveform,
   Building,
+  Bot,
   ChevronDown,
   Cloud,
   CreditCard,
@@ -73,6 +74,7 @@ const tenantNavGroups = [
       { title: "Shares", icon: Share2, href: "/shares" },
       { title: "Users", icon: User, href: "/users" },
       { title: "Teams", icon: Users, href: "/teams" },
+      { title: "Bots", icon: Bot, href: "/bots" },
     ]
   },
   {
