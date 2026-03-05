@@ -27,10 +27,12 @@ export async function GET(request: NextRequest) {
 
         // Try bot token (HS256) first
         let userEmail: string | null = null;
+        let botPermissions: string[] | null = null;
         try {
             const { payload } = await jwtVerify(token, BOT_JWT_SECRET);
             if (payload.type === 'bot') {
                 userEmail = payload.email as string;
+                botPermissions = payload.permissions as string[];
             }
         } catch {}
 
@@ -46,9 +48,19 @@ export async function GET(request: NextRequest) {
         const user = await prisma.user.findUnique({ where: { email: userEmail as string } });
         if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-        if (user.role !== Role.PLATFORM_ADMIN && user.role !== Role.TENANT_ADMIN) {
+        // Bots bypass role check — their access is scoped by bucket permissions in the token
+        if (!botPermissions && user.role !== Role.PLATFORM_ADMIN && user.role !== Role.TENANT_ADMIN) {
             return NextResponse.json({ error: 'Forbidden: agent sync requires ADMIN role' }, { status: 403 });
         }
+
+        // Parse allowed bucket IDs from bot permissions: "BUCKET:id:PERM"
+        const allowedBucketIds = botPermissions
+            ? Array.from(new Set(
+                botPermissions
+                    .filter(p => p.startsWith('BUCKET:'))
+                    .map(p => p.split(':')[1])
+              ))
+            : null; // null = no restriction (admin user)
 
         // Scope by tenant
         const whereClause: any = user.role === Role.PLATFORM_ADMIN
@@ -71,14 +83,13 @@ export async function GET(request: NextRequest) {
         // For each account, fetch its buckets + ALL file objects in those buckets
         const accountsWithData = await Promise.all(accounts.map(async (acc) => {
             const buckets = await prisma.bucket.findMany({
-                where: { accountId: acc.id },
+                where: {
+                    accountId: acc.id,
+                    ...(allowedBucketIds ? { id: { in: allowedBucketIds } } : {}),
+                },
                 select: {
-                    id: true,
-                    name: true,
-                    region: true,
-                    accountId: true,
-                    updatedAt: true,
-                    createdAt: true,
+                    id: true, name: true, region: true,
+                    accountId: true, updatedAt: true, createdAt: true,
                 }
             });
 

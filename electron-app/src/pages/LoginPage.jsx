@@ -28,7 +28,7 @@ export default function LoginPage() {
     const { login, requiresNewPassword, challengeUsername, submitNewPassword, loginAsBot } = useAuth();
 
     // Top-level mode
-    const [topMode, setTopMode]   = useState('login'); // 'login' | 'sso' | 'bot'
+    const [topMode, setTopMode]   = useState('sso'); // 'login' | 'sso' | 'bot'
     // Password sub-mode
     const [pwMode, setPwMode]     = useState('login'); // 'login' | 'new_password' | 'forgot_password' | 'confirm_password'
     // Bot sub-mode
@@ -369,7 +369,7 @@ export default function LoginPage() {
             return (
                 <div className="space-y-4">
                     <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 space-y-2">
-                        <p className="font-medium">Phase A — Identity Creation</p>
+                        <p className="font-medium">Identity Creation</p>
                         <p>Generate a key pair on this machine. The private key stays here; you'll register the public key in the web dashboard.</p>
                     </div>
                     {error && <p className="text-sm font-medium text-red-500 text-center">{error}</p>}
@@ -387,7 +387,7 @@ export default function LoginPage() {
                 <div className="space-y-4">
                     {/* Phase B instructions */}
                     <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-800 space-y-2">
-                        <p className="font-medium">Phase B — Register in Web Dashboard</p>
+                        <p className="font-medium">Register in Web Dashboard</p>
                         <ol className="list-decimal list-inside space-y-1 text-xs">
                             <li>Copy the public key below.</li>
                             <li>Go to the CloudVault web dashboard → Bots → Add Bot.</li>
@@ -455,7 +455,7 @@ export default function LoginPage() {
     // ─── Top-level render ─────────────────────────────────────────────────────
 
     const tabConfig = [
-        { id: 'login', label: 'Password',   icon: <Eye size={14} /> },
+        // { id: 'login', label: 'Password',   icon: <Eye size={14} /> },
         { id: 'sso',   label: 'SSO',        icon: <Globe size={14} /> },
         { id: 'bot',   label: 'Bot',        icon: <Bot size={14} /> },
     ];
@@ -491,7 +491,7 @@ export default function LoginPage() {
 
                 <CardContent className="space-y-4">
                     {/* Mode tabs — only show on top-level login (not sub-modes) */}
-                    {(topMode !== 'login' || pwMode === 'login') && (
+                    {/* (topMode !== 'login' || pwMode === 'login') && */ (
                         <div className="flex rounded-lg border border-slate-200 p-1 gap-1 bg-slate-50">
                             {tabConfig.map(tab => (
                                 <button

@@ -303,10 +303,36 @@ const closeDB = () => {
   }
 };
 
+/**
+ * Wipe all user data tables on logout.
+ * Preserves schema (tables remain), just deletes all rows.
+ * Order respects FK constraints (children before parents).
+ */
+const wipeAllData = () => {
+  const conn = getDb();
+  conn.exec('BEGIN TRANSACTION;');
+  try {
+    const tables = [
+      'LocalSyncActivity', 'SyncJob', 'SyncMapping', 'SyncConfig',
+      'SyncState', 'FileObject', 'Bucket', 'Account', 'Tenant',
+    ];
+    for (const t of tables) {
+      conn.exec(`DELETE FROM "${t}";`);
+    }
+    conn.exec('COMMIT;');
+    console.log('[Database] All data wiped on logout');
+  } catch (e) {
+    conn.exec('ROLLBACK;');
+    console.error('[Database] Wipe failed:', e);
+    throw e;
+  }
+};
+
 module.exports = {
   query,
   queryWithArrayParam,
   initDB,
   closeDB,
+  wipeAllData,
   getDb,
 };

@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
       tenantId:    bot.tenantId,
       permissions: bot.permissions,
       email:       bot.user.email,
+      botName:     bot.name,
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt(now)
@@ -133,7 +134,7 @@ export async function POST(request: NextRequest) {
       resourceId: botId, details: { name: bot.name }, status: 'SUCCESS',
     });
 
-    return NextResponse.json({ accessToken, refreshToken, email: bot.user.email, botId });
+    return NextResponse.json({ accessToken, refreshToken, email: bot.user.email, botId, botName: bot.name });
   } catch (err) {
     console.error('[bot/verify] Unexpected error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

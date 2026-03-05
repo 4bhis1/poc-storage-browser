@@ -17,6 +17,7 @@ interface GenericModalProps {
   footer?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  className?: string;
 }
 
 export function GenericModal({
@@ -27,11 +28,12 @@ export function GenericModal({
   footer,
   open,
   onOpenChange,
+  className,
 }: GenericModalProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>}
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className={className ?? "sm:max-w-[425px]"}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description ? (

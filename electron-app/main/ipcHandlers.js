@@ -294,6 +294,11 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
     });
 
     ipcMain.handle('auth:logout', () => {
+        try {
+            backend.db.wipeAllData();
+        } catch (e) {
+            console.error('[IPC] wipe on logout failed:', e.message);
+        }
         authManager.logout();
         return { success: true };
     });

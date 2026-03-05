@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowUp, ArrowDown, LogOut, HardDrive, Search, Cloud, FolderOpen, File, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, LogOut, HardDrive, Search, Cloud, FolderOpen, File, X, Bot } from 'lucide-react';
 import { useSystem } from '../contexts/SystemContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -7,7 +7,7 @@ import { Button } from './ui/button';
 
 const TopBar = () => {
     const { networkStats, diskStats } = useSystem();
-    const { user, logout } = useAuth();
+    const { user, logout, isBot, botName } = useAuth();
     const navigate = useNavigate();
 
     const [searchQuery, setSearchQuery] = useState('');
@@ -213,9 +213,26 @@ const TopBar = () => {
                     <Button variant="ghost" size="icon" onClick={logout} title="Logout" className="h-10 w-10 mr-1 rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-200/50">
                         <LogOut className="h-5 w-5" />
                     </Button>
-                    <div className="h-9 w-9 bg-purple-100 text-purple-700 font-bold rounded-full flex items-center justify-center text-sm shadow-sm cursor-pointer border border-purple-200/60">
-                        {(user?.name || 'A').charAt(0).toUpperCase()}
-                    </div>
+                    {isBot ? (
+                        <div
+                            className="h-9 w-9 bg-amber-100 text-amber-700 font-bold rounded-full flex items-center justify-center shadow-sm cursor-default border border-amber-300/60 relative group"
+                            title={botName || 'Bot Agent'}
+                        >
+                            <Bot className="h-4 w-4" />
+                            {/* Tooltip */}
+                            <div className="absolute bottom-full right-0 mb-2 hidden group-hover:flex flex-col items-end z-50">
+                                <div className="bg-slate-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-lg">
+                                    <p className="font-semibold text-amber-300">Bot Session</p>
+                                    <p className="text-slate-300 mt-0.5">{botName || 'Bot Agent'}</p>
+                                </div>
+                                <div className="w-2 h-2 bg-slate-900 rotate-45 mr-3.5 -mt-1" />
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="h-9 w-9 bg-purple-100 text-purple-700 font-bold rounded-full flex items-center justify-center text-sm shadow-sm cursor-pointer border border-purple-200/60">
+                            {(user?.name || 'A').charAt(0).toUpperCase()}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

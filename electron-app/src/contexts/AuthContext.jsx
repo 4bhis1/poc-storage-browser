@@ -10,6 +10,8 @@ export const AuthProvider = ({ children }) => {
     const [token, setToken]                       = useState(null);
     const [user, setUser]                         = useState(null);
     const [loading, setLoading]                   = useState(true);
+    const [isBot, setIsBot]                       = useState(false);
+    const [botName, setBotName]                   = useState(null);
     // NEW_PASSWORD_REQUIRED challenge state
     const [requiresNewPassword, setRequiresNewPassword] = useState(false);
     const [challengeSession, setChallengeSession] = useState(null);
@@ -95,6 +97,8 @@ export const AuthProvider = ({ children }) => {
     const _clearState = () => {
         setToken(null);
         setUser(null);
+        setIsBot(false);
+        setBotName(null);
         setRequiresNewPassword(false);
         setChallengeSession(null);
         setChallengeUsername(null);
@@ -179,11 +183,17 @@ export const AuthProvider = ({ children }) => {
                 return { success: false, error: result.error || 'Handshake failed' };
             }
             setToken(result.accessToken);
-            // Bot token is HS256 — decode manually without relying on Cognito payload shape
-            setUser({ email: result.email, username: result.email, name: result.email?.split('@')[0] || 'Bot', sub: botId });
+            setIsBot(true);
+            // Decode botName from HS256 JWT payload (safe — not verifying, just reading)
+            let resolvedBotName = result.botName || 'Bot Agent';
+            try {
+                const p = JSON.parse(atob(result.accessToken.split('.')[1]));
+                if (p.botName) resolvedBotName = p.botName;
+            } catch {}
+            setBotName(resolvedBotName);
+            setUser({ email: result.email, username: result.email, name: resolvedBotName, sub: botId });
             window.electronAPI.initSync?.(result.accessToken);
             navigate('/');
-            // Bucket sync in background — don't block or throw
             window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bot bucket sync failed (non-fatal):', e));
             return { success: true };
         } catch (err) {
@@ -210,6 +220,8 @@ export const AuthProvider = ({ children }) => {
         requiresNewPassword,
         challengeUsername,
         session: challengeSession,
+        isBot,
+        botName,
     };
 
     return (
