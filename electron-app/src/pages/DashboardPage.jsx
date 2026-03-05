@@ -149,7 +149,7 @@ export default function DashboardPage() {
       // Core stats from local DB
       const [bucketRes, fileRes, actRes, configRes] = await Promise.all([
         window.electronAPI.dbQuery('SELECT COUNT(*) as count FROM "Bucket"', []),
-        window.electronAPI.dbQuery('SELECT COUNT(*) as count, COALESCE(SUM(size), 0) as total FROM "FileObject" WHERE "isFolder" = false', []),
+        window.electronAPI.dbQuery('SELECT COUNT(*) as count, COALESCE(SUM(size), 0) as total FROM "FileObject" WHERE "isFolder" = 0', []),
         window.electronAPI.getLocalSyncActivities(null),
         window.electronAPI.getSyncConfigs(),
       ]);

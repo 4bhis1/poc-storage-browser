@@ -55,8 +55,8 @@ export default function BucketsPage() {
       // Fetch per-bucket file counts and total sizes
       const statsRes = await window.electronAPI.dbQuery(
         `SELECT "bucketId",
-                COUNT(*) FILTER (WHERE "isFolder" = false) as file_count,
-                COALESCE(SUM(size) FILTER (WHERE "isFolder" = false), 0) as total_size
+                SUM(CASE WHEN "isFolder" = 0 THEN 1 ELSE 0 END) as file_count,
+                COALESCE(SUM(CASE WHEN "isFolder" = 0 THEN size ELSE 0 END), 0) as total_size
          FROM "FileObject"
          GROUP BY "bucketId"`,
         []

@@ -105,7 +105,7 @@ class SyncManager {
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     "updatedAt" = EXCLUDED."updatedAt"
-            `, [tenant.id, tenant.name, tenant.updatedAt || new Date()]);
+            `, [tenant.id, tenant.name, tenant.updatedAt || new Date().toISOString()]);
         }
 
         // 2. Sync Accounts (with real encrypted credentials)
@@ -123,7 +123,7 @@ class SyncManager {
                 account.awsAccessKeyId,
                 account.awsSecretAccessKey,
                 account.tenantId,
-                account.updatedAt || new Date()
+                account.updatedAt || new Date().toISOString()
             ]);
 
             console.log(`[SyncManager] Account synced: ${account.name} (creds: ${account.awsAccessKeyId ? 'OK' : 'MISSING'})`);
@@ -139,27 +139,34 @@ class SyncManager {
         // Read configs that need sync (respecting interval)
         const configs = await database.query(`
             SELECT * FROM "SyncConfig" 
-            WHERE "isActive" = true AND "isSyncing" = false AND
-            ("lastSync" IS NULL OR "lastSync" < NOW() - ("intervalMinutes" * interval '1 minute'))
+            WHERE "isActive" = 1 AND "isSyncing" = 0 AND
+            ("lastSync" IS NULL OR "lastSync" < datetime('now', '-' || "intervalMinutes" || ' minutes'))
         `);
 
         for (const config of configs.rows) {
             // Per-config lock: set isSyncing = true
-            const lockResult = await database.query(
-                `UPDATE "SyncConfig" SET "isSyncing" = true WHERE id = $1 AND "isSyncing" = false RETURNING id`,
+            // SQLite: no RETURNING — use a SELECT after UPDATE to confirm lock
+            const preCheck = await database.query(
+                `SELECT id FROM "SyncConfig" WHERE id = $1 AND "isSyncing" = 0`,
                 [config.id]
             );
-            if (lockResult.rows.length === 0) {
+            if (preCheck.rows.length === 0) {
                 console.log(`[SyncManager] Config "${config.name}" is already syncing, skipping.`);
                 continue;
             }
+            await database.query(
+                `UPDATE "SyncConfig" SET "isSyncing" = 1 WHERE id = $1 AND "isSyncing" = 0`,
+                [config.id]
+            );
+            const lockResult = preCheck;
+            // Lock check already handled above
 
             const direction = config.direction || 'DOWNLOAD';
             console.log(`[SyncManager] Running scheduled sync config: ${config.name} (direction: ${direction})`);
             
             const jobId = 'job-' + Date.now();
             await database.query(
-                `INSERT INTO "SyncJob" (id, "configId", status, "startTime") VALUES ($1, $2, $3, NOW())`,
+                `INSERT INTO "SyncJob" (id, "configId", status, "startTime") VALUES ($1, $2, $3, datetime('now'))`,
                 [jobId, config.id, 'RUNNING']
             );
 
@@ -186,18 +193,18 @@ class SyncManager {
                     }
                 }
                 await database.query(
-                    `UPDATE "SyncJob" SET status = $1, "endTime" = NOW(), "filesHandled" = $2 WHERE id = $3`,
+                    `UPDATE "SyncJob" SET status = $1, "endTime" = datetime('now'), "filesHandled" = $2 WHERE id = $3`,
                     ['COMPLETED', filesHandled, jobId]
                 );
             } catch (err) {
                 console.error(`[SyncManager] SyncJob ${jobId} failed:`, err);
                 await database.query(
-                    `UPDATE "SyncJob" SET status = $1, "endTime" = NOW(), error = $2 WHERE id = $3`,
+                    `UPDATE "SyncJob" SET status = $1, "endTime" = datetime('now'), error = $2 WHERE id = $3`,
                     ['FAILED', err.message, jobId]
                 );
             } finally {
                 // Always release the lock
-                await database.query(`UPDATE "SyncConfig" SET "isSyncing" = false, "lastSync" = NOW() WHERE id = $1`, [config.id]);
+                await database.query(`UPDATE "SyncConfig" SET "isSyncing" = 0, "lastSync" = datetime('now') WHERE id = $1`, [config.id]);
             }
         }
     }
@@ -215,7 +222,7 @@ class SyncManager {
                 name = EXCLUDED.name,
                 region = EXCLUDED.region,
                 "updatedAt" = EXCLUDED."updatedAt"
-        `, [bucket.id, bucket.name, bucket.region, bucket.accountId, bucket.updatedAt || new Date()]);
+        `, [bucket.id, bucket.name, bucket.region, bucket.accountId, bucket.updatedAt || new Date().toISOString()]);
 
         const files = bucket.files || [];
         for (const file of files) {
@@ -224,7 +231,7 @@ class SyncManager {
             // Upsert FileObject into local DB so search works
             await database.query(`
                 INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt", "remoteEtag")
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW(), $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, datetime('now'), $9)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     key = EXCLUDED.key,
@@ -233,17 +240,17 @@ class SyncManager {
                     "mimeType" = EXCLUDED."mimeType",
                     "updatedAt" = EXCLUDED."updatedAt",
                     "remoteEtag" = EXCLUDED."remoteEtag",
-                    "isSynced" = true,
-                    "lastSyncedAt" = NOW()
+                    "isSynced" = 1,
+                    "lastSyncedAt" = datetime('now')
             `, [
                 file.id || `${bucket.id}-${file.key}`,
                 file.name || file.key.split('/').pop() || file.key,
                 file.key,
-                file.isFolder || false,
+                file.isFolder ? 1 : 0,
                 file.size || null,
                 file.mimeType || null,
                 bucket.id,
-                file.updatedAt || new Date(),
+                file.updatedAt || new Date().toISOString(),
                 file.eTag || file.etag || null
             ]);
         }
@@ -265,7 +272,7 @@ class SyncManager {
             // Upsert FileObject into local DB so search works
             await database.query(`
                 INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt", "remoteEtag")
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW(), $9)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, datetime('now'), $9)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     key = EXCLUDED.key,
@@ -274,17 +281,17 @@ class SyncManager {
                     "mimeType" = EXCLUDED."mimeType",
                     "updatedAt" = EXCLUDED."updatedAt",
                     "remoteEtag" = EXCLUDED."remoteEtag",
-                    "isSynced" = true,
-                    "lastSyncedAt" = NOW()
+                    "isSynced" = 1,
+                    "lastSyncedAt" = datetime('now')
             `, [
                 file.id || `${bucket.id}-${file.key}`,
                 file.name || file.key.split('/').pop() || file.key,
                 file.key,
-                file.isFolder || false,
+                file.isFolder ? 1 : 0,
                 file.size || null,
                 file.mimeType || null,
                 bucket.id,
-                file.updatedAt || new Date(),
+                file.updatedAt || new Date().toISOString(),
                 file.eTag || file.etag || null
             ]);
 

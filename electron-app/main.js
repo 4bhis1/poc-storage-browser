@@ -158,7 +158,7 @@ app.whenReady().then(async () => {
 
   // Query DB for active watch paths (only UPLOAD configs with watcher enabled)
   try {
-     const watchConfigs = await backend.db.query('SELECT m."localPath" FROM "SyncMapping" m JOIN "SyncConfig" c ON m."configId" = c.id WHERE c."useWatcher" = true AND c."direction" = \'UPLOAD\'');
+     const watchConfigs = await backend.db.query('SELECT m."localPath" FROM "SyncMapping" m JOIN "SyncConfig" c ON m."configId" = c.id WHERE c."useWatcher" = 1 AND c."direction" = \'UPLOAD\'');
      watchConfigs.rows.forEach(r => watcher.add(r.localPath));
      console.log(`[Watcher] Initialized with ${watchConfigs.rows.length} active upload paths.`);
   } catch(e) {

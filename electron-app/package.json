@@ -5,6 +5,8 @@
   "scripts": {
     "start": "electron . --no-sandbox",
     "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && npm start\"",
+    "rebuild": "electron-rebuild",
+    "postinstall": "electron-rebuild",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -34,7 +36,7 @@
     "electron-store": "^8.2.0",
     "fs-extra": "^11.3.3",
     "lucide-react": "^0.574.0",
-    "pg": "^8.18.0",
+    "better-sqlite3": "^11.7.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.13.0",
@@ -43,6 +45,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@electron/rebuild": "^3.7.1",
     "@tailwindcss/postcss": "^4.0.0",
     "@vitejs/plugin-react": "^5.1.4",
     "autoprefixer": "^10.4.24",

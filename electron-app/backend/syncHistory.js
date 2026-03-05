@@ -56,7 +56,7 @@ class SyncHistoryLogger {
             // Dedup: don't insert if same file+action+status was logged in the last 30 minutes
             let dedupQuery = `SELECT id FROM "LocalSyncActivity"
                  WHERE action = $1 AND "fileName" = $2 AND status = $3
-                   AND "createdAt" > NOW() - INTERVAL '30 minutes'`;
+                   AND "createdAt" > datetime('now', '-30 minutes')`;
             let params = [action, fileName, status];
             if (configId) {
                 dedupQuery += ` AND "configId" = $4`;
@@ -72,7 +72,7 @@ class SyncHistoryLogger {
 
             await database.query(
                 `INSERT INTO "LocalSyncActivity" (id, action, "fileName", status, error, synced, "configId", "syncJobId")
-                 VALUES ($1, $2, $3, $4, $5, false, $6, $7)`,
+                 VALUES ($1, $2, $3, $4, $5, 0, $6, $7)`,
                 [id, action, fileName, status, error, configId, syncJobId]
             );
             console.log(`[SyncHistory] Local log: ${action} ${fileName} → ${status}`);
@@ -101,7 +101,7 @@ class SyncHistoryLogger {
         let rows = [];
         try {
             const result = await database.query(
-                `SELECT * FROM "LocalSyncActivity" WHERE synced = false ORDER BY "createdAt" ASC`
+                `SELECT * FROM "LocalSyncActivity" WHERE synced = 0 ORDER BY "createdAt" ASC`
             );
             rows = result.rows;
         } catch (err) {
@@ -146,9 +146,9 @@ class SyncHistoryLogger {
             if (res.status === 200 || res.status === 201) {
                 // Mark all flushed rows as synced in local DB
                 const ids = rows.map(r => r.id);
-                await database.query(
-                    `UPDATE "LocalSyncActivity" SET synced = true WHERE id = ANY($1::text[])`,
-                    [ids]
+                await database.queryWithArrayParam(
+                    `UPDATE "LocalSyncActivity" SET synced = 1 WHERE id = ANY($1::text[])`,
+                    ids
                 );
                 console.log(`[SyncHistory] Flushed ${rows.length} activities to Global DB ✓`);
             }

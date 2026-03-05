@@ -127,7 +127,7 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
                 `SELECT fo.id, fo.name, fo.key, fo."isFolder", fo.size, fo."mimeType", fo."bucketId", b.name AS "bucketName"
                  FROM "FileObject" fo
                  JOIN "Bucket" b ON fo."bucketId" = b.id
-                 WHERE fo.name ILIKE $1
+                 WHERE fo.name LIKE $1
                  ORDER BY fo."isFolder" DESC, fo.name ASC
                  LIMIT 30`,
                 [`%${query.trim()}%`]
@@ -206,7 +206,7 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
         try {
             const id = 'cfg-' + Date.now();
             const dir = direction || 'DOWNLOAD';
-            const watcher = dir === 'UPLOAD' ? (useWatcher !== false) : false;
+            const watcher = dir === 'UPLOAD' ? (useWatcher !== false ? 1 : 0) : 0;
             
             await backend.db.query(
                 `INSERT INTO "SyncConfig" (id, name, "intervalMinutes", "direction", "useWatcher") VALUES ($1, $2, $3, $4, $5)`,

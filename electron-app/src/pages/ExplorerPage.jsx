@@ -91,7 +91,7 @@ export default function ExplorerPage() {
         `SELECT f.*, b.name as "bucketName" 
          FROM "FileObject" f 
          JOIN "Bucket" b ON f."bucketId" = b.id 
-         WHERE f."isFolder" = false 
+         WHERE f."isFolder" = 0 
          ORDER BY f."updatedAt" DESC`
       );
       
