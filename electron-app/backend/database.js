@@ -55,9 +55,14 @@ const initDB = async () => {
                 "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "isSynced" BOOLEAN DEFAULT true, 
-                "lastSyncedAt" TIMESTAMP
+                "lastSyncedAt" TIMESTAMP,
+                "remoteEtag" TEXT,
+                "localEtag" TEXT
             );
         `);
+        
+        await client.query(`ALTER TABLE "FileObject" ADD COLUMN IF NOT EXISTS "remoteEtag" TEXT;`);
+        await client.query(`ALTER TABLE "FileObject" ADD COLUMN IF NOT EXISTS "localEtag" TEXT;`);
 
         // Sync State
         await client.query(`
@@ -93,11 +98,23 @@ const initDB = async () => {
                 "name" TEXT NOT NULL,
                 "intervalMinutes" INTEGER NOT NULL,
                 "isActive" BOOLEAN DEFAULT true,
+                "useWatcher" BOOLEAN DEFAULT true,
                 "createdAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "updatedAt" TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 "lastSync" TIMESTAMP
             );
         `);
+        
+        await client.query(`ALTER TABLE "SyncConfig" ADD COLUMN IF NOT EXISTS "useWatcher" BOOLEAN DEFAULT true;`);
+        await client.query(`ALTER TABLE "SyncConfig" ADD COLUMN IF NOT EXISTS "direction" TEXT DEFAULT 'DOWNLOAD';`);
+        await client.query(`ALTER TABLE "SyncConfig" ADD COLUMN IF NOT EXISTS "isSyncing" BOOLEAN DEFAULT false;`);
+
+        // FileObject enhancements for sync tracking
+        await client.query(`ALTER TABLE "FileObject" ADD COLUMN IF NOT EXISTS "syncStatus" TEXT DEFAULT 'Synced';`);
+        await client.query(`ALTER TABLE "FileObject" ADD COLUMN IF NOT EXISTS "lastModifiedOs" TIMESTAMP;`);
+
+        // Reset any stale isSyncing locks on startup (crash recovery)
+        await client.query(`UPDATE "SyncConfig" SET "isSyncing" = false WHERE "isSyncing" = true;`);
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS "SyncMapping" (

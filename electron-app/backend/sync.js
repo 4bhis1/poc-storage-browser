@@ -5,6 +5,7 @@ const fsPromises = require('fs/promises');
 const path = require('path');
 const https = require('https');
 const http = require('http');
+const crypto = require('crypto');
 const syncHistory = require('./syncHistory');
 
 const ROOT_PATH = process.env.ROOT_PATH || "/home/abhishek/FMS";
@@ -130,25 +131,31 @@ class SyncManager {
             // 3. For each bucket — upsert metadata to local DB
             for (const bucket of (account.buckets || [])) {
                 await this.upsertBucketMetadata(bucket);
-                // Retain backward compatibility: if no configs use this bucket, sync to default ROOT_PATH
-                const checkMaps = await database.query('SELECT id FROM "SyncMapping" WHERE "bucketId" = $1', [bucket.id]);
-                if (checkMaps.rows.length === 0) {
-                     await this.syncBucketToLocal(bucket, path.join(ROOT_PATH, bucket.name), null);
-                }
             }
         }
     }
 
     async syncConfigs() {
-        // Read configs that need sync
+        // Read configs that need sync (respecting interval)
         const configs = await database.query(`
             SELECT * FROM "SyncConfig" 
-            WHERE "isActive" = true AND 
+            WHERE "isActive" = true AND "isSyncing" = false AND
             ("lastSync" IS NULL OR "lastSync" < NOW() - ("intervalMinutes" * interval '1 minute'))
         `);
 
         for (const config of configs.rows) {
-            console.log(`[SyncManager] Running scheduled sync config: ${config.name}`);
+            // Per-config lock: set isSyncing = true
+            const lockResult = await database.query(
+                `UPDATE "SyncConfig" SET "isSyncing" = true WHERE id = $1 AND "isSyncing" = false RETURNING id`,
+                [config.id]
+            );
+            if (lockResult.rows.length === 0) {
+                console.log(`[SyncManager] Config "${config.name}" is already syncing, skipping.`);
+                continue;
+            }
+
+            const direction = config.direction || 'DOWNLOAD';
+            console.log(`[SyncManager] Running scheduled sync config: ${config.name} (direction: ${direction})`);
             
             const jobId = 'job-' + Date.now();
             await database.query(
@@ -160,17 +167,22 @@ class SyncManager {
             try {
                 const mappings = await database.query('SELECT * FROM "SyncMapping" WHERE "configId" = $1', [config.id]);
                 for (const map of mappings.rows) {
-                    // Get all files for this bucket from local DB
                     const filesQuery = await database.query('SELECT * FROM "FileObject" WHERE "bucketId" = $1', [map.bucketId]);
                     const bucketMock = {
                         id: map.bucketId,
                         name: (await database.query('SELECT name FROM "Bucket" WHERE id = $1', [map.bucketId])).rows[0]?.name,
                         files: filesQuery.rows
                     };
-                    if (bucketMock.name) {
+                    if (!bucketMock.name) continue;
+
+                    if (direction === 'DOWNLOAD') {
+                        // Download mode: mirror + preserve (never delete local files)
                         const dl = await this.syncBucketToLocal(bucketMock, map.localPath, config.id, jobId);
+                        filesHandled += dl;
+                    } else if (direction === 'UPLOAD') {
+                        // Upload mode: scan local → push to cloud
                         const ul = await this.syncLocalToBucket(bucketMock, map.localPath, config.id, jobId);
-                        filesHandled += (dl + ul);
+                        filesHandled += ul;
                     }
                 }
                 await database.query(
@@ -183,9 +195,10 @@ class SyncManager {
                     `UPDATE "SyncJob" SET status = $1, "endTime" = NOW(), error = $2 WHERE id = $3`,
                     ['FAILED', err.message, jobId]
                 );
+            } finally {
+                // Always release the lock
+                await database.query(`UPDATE "SyncConfig" SET "isSyncing" = false, "lastSync" = NOW() WHERE id = $1`, [config.id]);
             }
-
-            await database.query(`UPDATE "SyncConfig" SET "lastSync" = NOW() WHERE id = $1`, [config.id]);
         }
     }
 
@@ -210,8 +223,8 @@ class SyncManager {
 
             // Upsert FileObject into local DB so search works
             await database.query(`
-                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt")
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW())
+                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt", "remoteEtag")
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW(), $9)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     key = EXCLUDED.key,
@@ -219,6 +232,7 @@ class SyncManager {
                     size = EXCLUDED.size,
                     "mimeType" = EXCLUDED."mimeType",
                     "updatedAt" = EXCLUDED."updatedAt",
+                    "remoteEtag" = EXCLUDED."remoteEtag",
                     "isSynced" = true,
                     "lastSyncedAt" = NOW()
             `, [
@@ -229,7 +243,8 @@ class SyncManager {
                 file.size || null,
                 file.mimeType || null,
                 bucket.id,
-                file.updatedAt || new Date()
+                file.updatedAt || new Date(),
+                file.eTag || file.etag || null
             ]);
         }
     }
@@ -249,8 +264,8 @@ class SyncManager {
 
             // Upsert FileObject into local DB so search works
             await database.query(`
-                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt")
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW())
+                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt", "remoteEtag")
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, true, NOW(), $9)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
                     key = EXCLUDED.key,
@@ -258,6 +273,7 @@ class SyncManager {
                     size = EXCLUDED.size,
                     "mimeType" = EXCLUDED."mimeType",
                     "updatedAt" = EXCLUDED."updatedAt",
+                    "remoteEtag" = EXCLUDED."remoteEtag",
                     "isSynced" = true,
                     "lastSyncedAt" = NOW()
             `, [
@@ -268,7 +284,8 @@ class SyncManager {
                 file.size || null,
                 file.mimeType || null,
                 bucket.id,
-                file.updatedAt || new Date()
+                file.updatedAt || new Date(),
+                file.eTag || file.etag || null
             ]);
 
             if (file.isFolder) {
@@ -283,15 +300,44 @@ class SyncManager {
             // Build the expected local path for this file
             const localFilePath = path.join(rootFolder, file.key);
 
-            // Check if the file already exists locally with matching size
+            // Check if the file already exists locally with matching size/ETag
             const existsLocally = fs.existsSync(localFilePath);
             if (existsLocally) {
                 const localStat = fs.statSync(localFilePath);
-                if (file.size && localStat.size === parseInt(file.size)) {
+                
+                // Get the DB record for the local file's known ETag
+                const dbFile = await database.query('SELECT "localEtag" FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [file.key, bucket.id]);
+                const localEtagSaved = dbFile.rows[0]?.localEtag;
+                
+                const rawRemoteEtag = file.eTag || file.etag;
+                const remoteEtag = rawRemoteEtag ? rawRemoteEtag.replace(/"/g, '') : null;
+                
+                let isMatch = false;
+                
+                if (remoteEtag && localEtagSaved && remoteEtag === localEtagSaved) {
+                    isMatch = true;
+                } else if (file.size && localStat.size === parseInt(file.size)) {
+                    // Fallback to size if ETags aren't fully populated yet, but compute and save localEtag for future if remote is present
+                    if (remoteEtag && !remoteEtag.includes('-')) {
+                        try {
+                            const newLocalHash = await this._computeFileHash(localFilePath);
+                            if (newLocalHash === remoteEtag) {
+                                isMatch = true;
+                                await database.query('UPDATE "FileObject" SET "localEtag" = $1 WHERE key = $2 AND "bucketId" = $3', [newLocalHash, file.key, bucket.id]);
+                            } else {
+                                isMatch = false; // Size matched but contents changed
+                            }
+                        } catch(e) {}
+                    } else {
+                        isMatch = true; // Fallback to purely size match (e.g. multipart S3 files)
+                    }
+                }
+                
+                if (isMatch) {
                     skippedCount++;
                     continue; // Already synced
                 }
-                console.log(`[SyncManager] File size mismatch, re-downloading: ${file.key}`);
+                console.log(`[SyncManager] File mismatched, re-downloading: ${file.key}`);
             }
 
             // File is missing or corrupted locally — download from S3 via presigned URL
@@ -333,27 +379,44 @@ class SyncManager {
         const remoteKeys = new Set(bucket.files.map(f => f.key));
 
         let uploadCount = 0;
-        const uploadManager = require('./transfers/upload');
+        const uploadQueue = require('./transfers/queue');
 
         for (const localPath of localFiles) {
             const relativePath = path.relative(rootFolder, localPath);
             const s3Key = relativePath.split(path.sep).join('/');
 
+            let shouldUpload = false;
+
             if (!remoteKeys.has(s3Key)) {
-                // File exists locally but NOT in S3 — we must re-upload
-                // (Or it's a new file chokidar missed).
-                console.log(`[SyncManager] Local file missing in S3, re-uploading: ${s3Key}`);
+                shouldUpload = true; // Missing from S3 entirely
+            } else {
+                // Check if local file has been modified since it was last synced
                 try {
-                    await uploadManager.uploadWithBucketId(bucket.id, localPath, s3Key, null, configId, syncJobId);
-                    uploadCount++;
-                } catch (err) {
-                    console.error(`[SyncManager] Failed to cron-upload ${s3Key}:`, err.message);
-                }
+                    const localStat = fs.statSync(localPath);
+                    const dbFile = await database.query('SELECT size, "updatedAt" FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [s3Key, bucket.id]);
+                    const record = dbFile.rows[0];
+                    if (record) {
+                        const sizeMismatched = Array.isArray(record.size) || record.size ? parseInt(record.size) !== localStat.size : false;
+                        const timeMismatched = record.updatedAt ? new Date(record.updatedAt).getTime() < localStat.mtime.getTime() : false;
+                        
+                        if (sizeMismatched || timeMismatched) {
+                            shouldUpload = true;
+                        }
+                    } else {
+                        shouldUpload = true; // Edge case: not in DB but exists
+                    }
+                } catch(e) {}
+            }
+
+            if (shouldUpload) {
+                console.log(`[SyncManager] Local file missing in S3 or modified locally, queueing upload: ${s3Key}`);
+                uploadQueue.addUploadTask(bucket.id, localPath, s3Key, null, configId, syncJobId);
+                uploadCount++;
             }
         }
 
         if (uploadCount > 0) {
-            console.log(`[SyncManager] Bucket "${bucket.name}": Re-uploaded ${uploadCount} missing files from local folder ${rootFolder}`);
+            console.log(`[SyncManager] Bucket "${bucket.name}": Queued ${uploadCount} missing/modified files from local folder ${rootFolder}`);
         }
         return uploadCount;
     }
@@ -399,6 +462,14 @@ class SyncManager {
                     statusManager.updateProgress(transferId, (bytesWritten / file.size) * 100, bytesWritten);
                 }
             });
+
+            // Calculate local ETag after download
+            try {
+                const downloadedHash = await this._computeFileHash(localFilePath);
+                await database.query('UPDATE "FileObject" SET "localEtag" = $1 WHERE key = $2 AND "bucketId" = $3', [downloadedHash, file.key, bucket.id]);
+            } catch(e) {
+                console.error(`[SyncManager] Failed to compute ETag for ${file.key}:`, e.message);
+            }
 
             statusManager.completeTransfer(transferId, 'done');
             console.log(`[SyncManager] Downloaded: ${file.key}`);
@@ -446,6 +517,16 @@ class SyncManager {
                 fs.unlink(destPath, () => {});
                 reject(err);
             });
+        });
+    }
+
+    _computeFileHash(filePath) {
+        return new Promise((resolve, reject) => {
+            const hash = crypto.createHash('md5');
+            const stream = fs.createReadStream(filePath);
+            stream.on('data', data => hash.update(data));
+            stream.on('end', () => resolve(hash.digest('hex')));
+            stream.on('error', reject);
         });
     }
 }

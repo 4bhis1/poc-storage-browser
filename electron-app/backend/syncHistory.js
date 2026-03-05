@@ -23,6 +23,11 @@ const API_URL = process.env.API_URL || 'http://localhost:3000/api';
 class SyncHistoryLogger {
     constructor() {
         this.authToken = null;
+        this.mainWindow = null;
+    }
+
+    initUI(mainWindow) {
+        this.mainWindow = mainWindow;
     }
 
     init(token) {
@@ -71,6 +76,12 @@ class SyncHistoryLogger {
                 [id, action, fileName, status, error, configId, syncJobId]
             );
             console.log(`[SyncHistory] Local log: ${action} ${fileName} → ${status}`);
+            
+            if (this.mainWindow && !this.mainWindow.isDestroyed()) {
+                this.mainWindow.webContents.send('sync-activity-logged', {
+                    id, action, fileName, status, error, configId, syncJobId, createdAt: new Date()
+                });
+            }
         } catch (err) {
             console.error('[SyncHistory] Failed to write local activity:', err.message);
         }

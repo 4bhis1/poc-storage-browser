@@ -1,0 +1,115 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                 String    @id
+  name               String
+  tenantId           String
+  isActive           Boolean?  @default(true)
+  createdAt          DateTime? @default(now()) @db.Timestamp(6)
+  updatedAt          DateTime? @default(now()) @db.Timestamp(6)
+  awsAccessKeyId     String?
+  awsSecretAccessKey String?
+  Tenant             Tenant    @relation(fields: [tenantId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  Bucket             Bucket[]
+}
+
+model Bucket {
+  id           String       @id
+  name         String
+  region       String
+  accountId    String
+  storageClass String?      @default("STANDARD")
+  versioning   Boolean?     @default(false)
+  encryption   Boolean?     @default(false)
+  createdAt    DateTime?    @default(now()) @db.Timestamp(6)
+  updatedAt    DateTime?    @default(now()) @db.Timestamp(6)
+  Account      Account      @relation(fields: [accountId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  FileObject   FileObject[]
+}
+
+model FileObject {
+  id               String       @id
+  name             String
+  key              String
+  isFolder         Boolean?     @default(false)
+  size             BigInt?
+  mimeType         String?
+  bucketId         String
+  parentId         String?
+  createdAt        DateTime?    @default(now()) @db.Timestamp(6)
+  updatedAt        DateTime?    @default(now()) @db.Timestamp(6)
+  isSynced         Boolean?     @default(true)
+  lastSyncedAt     DateTime?    @db.Timestamp(6)
+  remoteEtag       String?
+  localEtag        String?
+  Bucket           Bucket       @relation(fields: [bucketId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  FileObject       FileObject?  @relation("FileObjectToFileObject", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  other_FileObject FileObject[] @relation("FileObjectToFileObject")
+}
+
+model LocalSyncActivity {
+  id        String    @id
+  action    String
+  fileName  String
+  status    String
+  error     String?
+  createdAt DateTime? @default(now()) @db.Timestamp(6)
+  synced    Boolean?  @default(false)
+  syncJobId String?
+  configId  String?
+}
+
+model SyncConfig {
+  id              String        @id
+  name            String
+  intervalMinutes Int
+  isActive        Boolean?      @default(true)
+  useWatcher      Boolean?      @default(true)
+  createdAt       DateTime?     @default(now()) @db.Timestamp(6)
+  updatedAt       DateTime?     @default(now()) @db.Timestamp(6)
+  lastSync        DateTime?     @db.Timestamp(6)
+  SyncJob         SyncJob[]
+  SyncMapping     SyncMapping[]
+}
+
+model SyncJob {
+  id           String     @id
+  configId     String
+  status       String
+  startTime    DateTime?  @default(now()) @db.Timestamp(6)
+  endTime      DateTime?  @db.Timestamp(6)
+  filesHandled Int?       @default(0)
+  error        String?
+  SyncConfig   SyncConfig @relation(fields: [configId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model SyncMapping {
+  id         String     @id
+  configId   String
+  localPath  String
+  bucketId   String
+  createdAt  DateTime?  @default(now()) @db.Timestamp(6)
+  SyncConfig SyncConfig @relation(fields: [configId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+}
+
+model SyncState {
+  id                String    @id
+  resourceId        String    @unique
+  lastSyncTimestamp DateTime? @db.Timestamp(6)
+  status            String?
+}
+
+model Tenant {
+  id        String    @id
+  name      String
+  createdAt DateTime? @default(now()) @db.Timestamp(6)
+  updatedAt DateTime? @default(now()) @db.Timestamp(6)
+  Account   Account[]
+}

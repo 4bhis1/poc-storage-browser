@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const AuthContext = createContext();
@@ -7,80 +7,171 @@ const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-    const [token, setToken] = useState(localStorage.getItem('accessToken'));
-    const [user, setUser] = useState(null);
-    const [loading, setLoading] = useState(true);
+    const [token, setToken]                       = useState(null);
+    const [user, setUser]                         = useState(null);
+    const [loading, setLoading]                   = useState(true);
+    // NEW_PASSWORD_REQUIRED challenge state
+    const [requiresNewPassword, setRequiresNewPassword] = useState(false);
+    const [challengeSession, setChallengeSession] = useState(null);
+    const [challengeUsername, setChallengeUsername] = useState(null);
+
     const navigate = useNavigate();
 
-    useEffect(() => {
-        // Hydrate token
-        const storedToken = localStorage.getItem('accessToken');
-        if (storedToken) {
-            setToken(storedToken);
-            // In a real app, verify token validity here or decode JWT
-            // For now, we assume it's valid if present
-            if (window.electronAPI) {
-                 window.electronAPI.initSync(storedToken);
-            }
-        }
-        setLoading(false);
+    // ─── Helpers ─────────────────────────────────────────────────────────────
 
-        let cleanupAuthExpired = null;
-        if (window.electronAPI) {
-            cleanupAuthExpired = window.electronAPI.onAuthExpired(() => {
-                console.warn("Authentication expired in backend. Logging out...");
-                localStorage.removeItem('accessToken');
-                setToken(null);
-                setUser(null);
+    const _decodeUser = (idToken) => {
+        try {
+            const payload = JSON.parse(atob(idToken.split('.')[1]));
+            return {
+                email:    payload.email || payload['cognito:username'] || '',
+                username: payload['cognito:username'] || payload.email || '',
+                name:     payload.name || payload.email?.split('@')[0] || 'User',
+                sub:      payload.sub || '',
+            };
+        } catch {
+            return { email: '', username: '', name: 'User', sub: '' };
+        }
+    };
+
+    const _hydrateFromSession = useCallback(async () => {
+        if (!window.electronAPI?.auth) {
+            setLoading(false);
+            return;
+        }
+        try {
+            const session = await window.electronAPI.auth.getSession();
+            if (session?.accessToken) {
+                setToken(session.accessToken);
+                const decoded = _decodeUser(session.idToken || session.accessToken);
+                setUser({ ...decoded, email: session.email || decoded.email });
+                // Re-init sync engine with the stored token
+                window.electronAPI.initSync?.(session.idToken || session.accessToken);
+                // Populate buckets in local DB immediately
+                window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bucket sync failed:', e));
+            }
+        } catch (err) {
+            console.warn('[AuthContext] Session hydration failed:', err);
+        } finally {
+            setLoading(false);
+        }
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ─── Mount: hydrate session + wire SSO + auth-expired listeners ──────────
+    useEffect(() => {
+        _hydrateFromSession();
+
+        let cleanupSSO = null;
+        let cleanupExpired = null;
+
+        if (window.electronAPI?.auth?.onSSOResult) {
+            cleanupSSO = window.electronAPI.auth.onSSOResult((data) => {
+                console.log('[AuthContext] SSO result received');
+                setToken(data.idToken);
+                const decoded = _decodeUser(data.idToken);
+                setUser({ ...decoded, email: data.email || decoded.email });
+                window.electronAPI.initSync?.(data.idToken);
+                // Populate buckets before navigating
+                window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bucket sync failed:', e));
+                navigate('/');
+            });
+        }
+
+        if (window.electronAPI?.onAuthExpired) {
+            cleanupExpired = window.electronAPI.onAuthExpired(() => {
+                console.warn('[AuthContext] Auth expired signal from backend');
+                _clearState();
                 navigate('/login');
             });
         }
 
         return () => {
-            if (cleanupAuthExpired) cleanupAuthExpired();
+            cleanupSSO?.();
+            cleanupExpired?.();
         };
-    }, [navigate]);
+    }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // ─── Actions ──────────────────────────────────────────────────────────────
+
+    const _clearState = () => {
+        setToken(null);
+        setUser(null);
+        setRequiresNewPassword(false);
+        setChallengeSession(null);
+        setChallengeUsername(null);
+    };
+
+    /**
+     * Primary sign-in. Returns:
+     *   { success: true }                           — landed on dashboard
+     *   { success: true, requiresNewPassword: true } — challenge needed
+     *   { success: false, error: string }
+     */
     const login = async (email, password) => {
         try {
-            const response = await fetch('http://localhost:3000/api/auth/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password, platform: "Agent" })
-            });
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || 'Login failed');
+            const result = await window.electronAPI.auth.login(email, password);
+            if (!result.success) {
+                return { success: false, error: result.error || 'Login failed' };
             }
-
-            const { accessToken, user: userData } = data;
-            
-            localStorage.setItem('accessToken', accessToken);
-            setToken(accessToken);
-            setUser(userData);
-            
-            // Initialize Sync Engine via IPC
-            if (window.electronAPI) {
-                window.electronAPI.initSync(accessToken);
+            if (result.challengeName === 'NEW_PASSWORD_REQUIRED') {
+                setRequiresNewPassword(true);
+                setChallengeSession(result.session);
+                setChallengeUsername(result.username || email);
+                return { success: true, requiresNewPassword: true };
             }
-            
+            setToken(result.accessToken);
+            const decoded = _decodeUser(result.idToken || result.accessToken);
+            setUser({ ...decoded, email: decoded.email || email });
+            window.electronAPI.initSync?.(result.idToken || result.accessToken);
+            // Populate buckets before navigating to dashboard
+            try {
+                await window.electronAPI.syncBucketsNow?.();
+            } catch (e) {
+                console.warn('[AuthContext] Initial bucket sync failed:', e);
+            }
             navigate('/');
             return { success: true };
-        } catch (error) {
-            console.error(error);
-            return { success: false, error: error.message };
+        } catch (err) {
+            return { success: false, error: err.message || 'An unexpected error occurred' };
         }
     };
 
-    const logout = () => {
-        localStorage.removeItem('accessToken');
-        setToken(null);
-        setUser(null);
-        if (window.electronAPI) {
-            window.electronAPI.stopSync();
+    /**
+     * Submit a new password after NEW_PASSWORD_REQUIRED challenge.
+     */
+    const submitNewPassword = async (newPassword) => {
+        try {
+            const result = await window.electronAPI.auth.newPassword(
+                challengeUsername,
+                newPassword,
+                challengeSession,
+            );
+            if (!result.success) {
+                return { success: false, error: result.error || 'Failed to set new password' };
+            }
+            setToken(result.accessToken);
+            const decoded = _decodeUser(result.idToken || result.accessToken);
+            setUser({ ...decoded, email: decoded.email || challengeUsername });
+            setRequiresNewPassword(false);
+            setChallengeSession(null);
+            setChallengeUsername(null);
+            window.electronAPI.initSync?.(result.idToken || result.accessToken);
+            // Populate buckets before navigating
+            try {
+                await window.electronAPI.syncBucketsNow?.();
+            } catch (e) {
+                console.warn('[AuthContext] Initial bucket sync failed:', e);
+            }
+            navigate('/');
+            return { success: true };
+        } catch (err) {
+            return { success: false, error: err.message };
         }
+    };
+
+    const logout = async () => {
+        await window.electronAPI?.auth?.logout?.();
+        window.electronAPI?.stopSync?.();
+        _clearState();
         navigate('/login');
     };
 
@@ -89,8 +180,12 @@ export const AuthProvider = ({ children }) => {
         user,
         login,
         logout,
+        submitNewPassword,
         isAuthenticated: !!token,
-        loading
+        loading,
+        requiresNewPassword,
+        challengeUsername,
+        session: challengeSession,
     };
 
     return (

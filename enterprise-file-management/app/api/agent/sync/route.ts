@@ -25,7 +25,10 @@ export async function GET(request: NextRequest) {
         if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
         // @ts-ignore
-        const user = await prisma.user.findUnique({ where: { email: payload.email as string } });
+        const userEmail = payload.email;
+        if (!userEmail) return NextResponse.json({ error: 'Invalid token payload: missing email' }, { status: 401 });
+
+        const user = await prisma.user.findUnique({ where: { email: userEmail as string } });
         if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
         if (user.role !== Role.PLATFORM_ADMIN && user.role !== Role.TENANT_ADMIN) {
@@ -82,7 +85,13 @@ export async function GET(request: NextRequest) {
                     orderBy: { key: 'asc' }, // Sorted so folders come before their children
                 });
 
-                return { ...bucket, files };
+                return {
+                    ...bucket,
+                    files: files.map(f => ({
+                        ...f,
+                        size: f.size !== null ? Number(f.size) : null
+                    }))
+                };
             }));
 
             return {

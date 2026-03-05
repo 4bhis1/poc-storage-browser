@@ -1,18 +1,8 @@
-import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { Checkbox } from '../components/ui/checkbox';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import {
-  Dialog, DialogContent, DialogDescription,
-  DialogFooter, DialogHeader, DialogTitle,
-} from '../components/ui/dialog';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
-  DropdownMenuSeparator, DropdownMenuTrigger,
-} from '../components/ui/dropdown-menu';
 import {
   Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue,
@@ -23,13 +13,10 @@ import {
 } from '../components/ui/table';
 
 import {
-  Archive, ArrowUpDown, ChevronRight, CloudUpload,
-  Copy, Download, File, FileCode, FileText,
-  FolderOpen, FolderPlus, HardDrive, Image,
-  List, LayoutGrid, MoreHorizontal, Move,
-  Music, Pencil, RefreshCw, Star,
-  Trash2, Upload, Users, Video, X, Package,
-  Folder,
+  Archive, ArrowUpDown, ChevronRight,
+  File, FileCode, FileText,
+  FolderOpen, HardDrive, Image,
+  List, LayoutGrid, Music, RefreshCw, Video
 } from 'lucide-react';
 
 const ROOT_PATH = "/home/abhishek/FMS";
@@ -81,412 +68,6 @@ const FileIcon = ({ file, className = "h-4 w-4" }) => {
   return <Icon className={`${className} shrink-0 ${color}`} />;
 };
 
-// ─── Upload Dialog ───────────────────────────────────────────────────────────
-function FileUploadDialog({ open, onOpenChange, bucketInfo, folderStack }) {
-  const [selectedFiles, setSelectedFiles] = useState([]);  // File objects from file input
-  const [selectedFolders, setSelectedFolders] = useState([]); // { name, path } from native dialog
-  const [isDragging, setIsDragging] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [shouldZip, setShouldZip] = useState(false);
-  const fileInputRef = useRef(null);
-
-  const hasFolders = selectedFolders.length > 0;
-  const totalItems = selectedFiles.length + selectedFolders.length;
-
-  const handleAddFiles = (fileList) => {
-    if (!fileList) return;
-    const newFiles = Array.from(fileList);
-    setSelectedFiles(prev => {
-      const existingKeys = new Set(prev.map(f => `${f.name}:${f.size}`));
-      return [...prev, ...newFiles.filter(f => !existingKeys.has(`${f.name}:${f.size}`))];
-    });
-    if (fileInputRef.current) fileInputRef.current.value = '';
-  };
-
-  // Use Electron's native folder picker — returns actual folder PATHS (not webkitdirectory file objects)
-  const handleSelectFolder = async () => {
-    const paths = await window.electronAPI.selectFolderForUpload();
-    if (!paths || paths.length === 0) return;
-    setSelectedFolders(prev => {
-      const existingPaths = new Set(prev.map(f => f.path));
-      const newFolders = paths
-        .filter(p => !existingPaths.has(p))
-        .map(p => ({ name: p.split('/').pop() || p, path: p }));
-      return [...prev, ...newFolders];
-    });
-  };
-
-  const removeFile = (index) => setSelectedFiles(prev => prev.filter((_, i) => i !== index));
-  const removeFolder = (index) => setSelectedFolders(prev => prev.filter((_, i) => i !== index));
-
-  const handleUpload = async () => {
-    if (totalItems === 0 || !bucketInfo) return;
-    setUploading(true);
-
-    const currentPhysicalPath = [ROOT_PATH, bucketInfo.name, ...folderStack.map(f => f.name)].join('/');
-
-    // Build the item list:
-    // - Regular files: resolve path via webUtils
-    // - Folders: already actual paths from native dialog
-    const filePaths = selectedFiles
-      .map(f => window.electronAPI.getFilePath(f))
-      .filter(Boolean);
-
-    const folderPaths = selectedFolders.map(f => f.path);
-
-    const allPaths = [...new Set([...filePaths, ...folderPaths])];
-
-    if (allPaths.length === 0) {
-      alert('Could not read file paths. Please re-select files.');
-      setUploading(false);
-      return;
-    }
-
-    try {
-      // shouldZip applies only when folders are selected
-      await window.electronAPI.uploadItems(allPaths, currentPhysicalPath, hasFolders && shouldZip);
-    } catch (err) {
-      console.error('[UploadDialog] Upload error:', err);
-      alert('Upload failed: ' + err.message);
-    } finally {
-      setUploading(false);
-      handleClose(false);
-    }
-  };
-
-  const handleDragOver = (e) => { e.preventDefault(); setIsDragging(true); };
-  const handleDragLeave = () => setIsDragging(false);
-  const handleDrop = (e) => {
-    e.preventDefault();
-    setIsDragging(false);
-    handleAddFiles(e.dataTransfer.files);
-  };
-
-  const handleClose = (val) => {
-    if (!val) {
-      setSelectedFiles([]);
-      setSelectedFolders([]);
-      setShouldZip(false);
-    }
-    onOpenChange(val);
-  };
-
-  const currentPathDisplay = folderStack.length > 0
-    ? `/${folderStack.map(f => f.name).join('/')}/`
-    : '/ (Root)';
-
-  return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-lg w-full overflow-hidden">
-        <DialogHeader>
-          <DialogTitle>Upload Files</DialogTitle>
-          <DialogDescription>
-            Drag and drop files or browse to upload to your bucket.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          {/* Destination Path */}
-          <div className="space-y-1.5 min-w-0">
-            <Label>Destination Path</Label>
-            <div className="flex items-center px-3 py-2 text-sm border rounded-md bg-muted/50 text-muted-foreground">
-              <span className="truncate">{currentPathDisplay}</span>
-            </div>
-          </div>
-
-          {/* Drop zone */}
-          <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-8 cursor-pointer transition-colors ${
-              isDragging ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground/50"
-            }`}
-          >
-            <CloudUpload className={`h-10 w-10 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
-            <div className="text-center">
-              <p className="text-sm font-medium">
-                {isDragging ? "Drop files here" : "Click to browse or drag files here"}
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">Supports any file type up to 5 GB</p>
-            </div>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className="hidden"
-              onChange={e => handleAddFiles(e.target.files)}
-            />
-          </div>
-
-          {/* Folder picker — uses native Electron dialog for real folder PATH */}
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5 text-xs"
-              onClick={handleSelectFolder}
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
-              Select Folder
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              Select an entire folder to upload
-            </span>
-          </div>
-
-          {/* Zip toggle — shown when folders are selected */}
-          {hasFolders && (
-            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-              <Package className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
-              <div className="flex-1 space-y-1">
-                <p className="text-sm font-medium text-amber-900">Folder detected</p>
-                <p className="text-xs text-amber-700">
-                  Would you like to compress the folder into a ZIP before uploading?
-                </p>
-                <div className="flex items-center gap-2 pt-1">
-                  <Checkbox
-                    id="zip-toggle"
-                    checked={shouldZip}
-                    onCheckedChange={setShouldZip}
-                  />
-                  <label htmlFor="zip-toggle" className="text-sm text-amber-900 cursor-pointer select-none">
-                    Zip folder before uploading
-                  </label>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Selected items list */}
-          {totalItems > 0 && (
-            <div className="max-h-[200px] w-full overflow-y-auto pr-1 border rounded-md">
-              <div className="space-y-1 p-1">
-                {/* Folder items */}
-                {selectedFolders.map((folder, i) => (
-                  <div key={`folder-${i}`} className="grid grid-cols-[auto_1fr_auto] gap-3 items-center rounded-md border border-amber-200 bg-amber-50/40 p-2.5">
-                    <FolderOpen className="h-4 w-4 text-amber-500 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{folder.name}</p>
-                      <p className="text-xs text-muted-foreground truncate">{folder.path}</p>
-                    </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFolder(i)}>
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ))}
-                {/* Regular file items */}
-                {selectedFiles.map((file, i) => (
-                  <div key={`file-${i}`} className="grid grid-cols-[auto_1fr_auto] gap-3 items-center rounded-md border p-2.5">
-                    <File className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium truncate">{file.name}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-xs text-muted-foreground whitespace-nowrap">{formatBytes(file.size)}</span>
-                      <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => removeFile(i)}>
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Actions */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-muted-foreground">
-              {totalItems > 0
-                ? `${totalItems} item${totalItems > 1 ? 's' : ''} selected${hasFolders && shouldZip ? ' — will be zipped' : ''}`
-                : "No files selected"}
-            </p>
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => handleClose(false)} disabled={uploading}>
-                Cancel
-              </Button>
-              <Button onClick={handleUpload} disabled={totalItems === 0 || uploading} className="gap-1.5">
-                {uploading ? (
-                  <><RefreshCw className="h-3.5 w-3.5 animate-spin" /> Uploading...</>
-                ) : (
-                  <>
-                    {hasFolders && shouldZip ? <Package className="h-3.5 w-3.5" /> : <Upload className="h-3.5 w-3.5" />}
-                    {hasFolders && shouldZip ? 'Zip & Upload' : 'Upload'}
-                  </>
-                )}
-              </Button>
-            </div>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── New Folder Dialog (enterprise-identical) ────────────────────────────────
-function NewFolderDialog({ open, onOpenChange, bucketInfo, folderStack, onFolderCreated }) {
-  const [name, setName] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!name.trim() || !bucketInfo) return;
-    setIsLoading(true);
-    try {
-      const currentPhysicalPath = [ROOT_PATH, bucketInfo.name, ...folderStack.map(f => f.name)].join('/');
-      const newPath = `${currentPhysicalPath}/${name.trim()}`;
-      const ok = await window.electronAPI.createFolder(newPath);
-      if (!ok) throw new Error('Failed to create folder');
-      setName('');
-      onOpenChange(false);
-      onFolderCreated?.();
-    } catch (err) {
-      alert('Failed to create folder: ' + err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const currentPathDisplay = folderStack.length > 0
-    ? `/${folderStack.map(f => f.name).join('/')}`
-    : 'root';
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[425px]">
-        <DialogHeader>
-          <DialogTitle>Create New Folder</DialogTitle>
-          <DialogDescription>
-            Create a new folder in{' '}
-            <span className="font-medium text-foreground">
-              {bucketInfo?.name}{currentPathDisplay}
-            </span>.
-          </DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="folder-name">Folder Name</Label>
-              <Input
-                id="folder-name"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder="e.g. Documents"
-                autoFocus
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isLoading}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={isLoading || !name.trim()}>
-              {isLoading ? 'Creating...' : 'Create Folder'}
-            </Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── Rename Dialog ───────────────────────────────────────────────────────────
-function RenameDialog({ open, onOpenChange, file, onRenamed }) {
-  const [name, setName] = useState('');
-  useEffect(() => { if (file) setName(file.name); }, [file]);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!name.trim() || name === file?.name) return;
-    // Rename local file via IPC
-    try {
-      const parent = file.path.substring(0, file.path.lastIndexOf('/'));
-      const newPath = `${parent}/${name.trim()}`;
-      await window.electronAPI.renameFile?.(file.path, newPath);
-      onRenamed?.();
-    } catch {
-      alert('Failed to rename — check console.');
-    }
-    onOpenChange(false);
-  };
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Rename {file?.name}</DialogTitle>
-          <DialogDescription>Enter a new name for this file.</DialogDescription>
-        </DialogHeader>
-        <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
-            <div className="grid gap-2">
-              <Label htmlFor="rename">New Name</Label>
-              <Input
-                id="rename"
-                value={name}
-                onChange={e => setName(e.target.value)}
-                placeholder={file?.name}
-                autoFocus
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-            <Button type="submit" disabled={!name.trim() || name === file?.name}>Rename</Button>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ─── File Context Menu ───────────────────────────────────────────────────────
-function FileContextMenu({ file, onAction }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-8 w-8">
-          <MoreHorizontal className="h-4 w-4" />
-          <span className="sr-only">Actions</span>
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem onClick={() => onAction('download', file)}>
-          <Download className="mr-2 h-4 w-4" />
-          Download
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onAction('copy', file)}>
-          <Copy className="mr-2 h-4 w-4" />
-          Copy Link
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onAction('share', file)}>
-          <Users className="mr-2 h-4 w-4" />
-          Share
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => onAction('rename', file)}>
-          <Pencil className="mr-2 h-4 w-4" />
-          Rename
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onAction('move', file)}>
-          <Move className="mr-2 h-4 w-4" />
-          Move
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          className="text-destructive focus:text-destructive focus:bg-destructive/10"
-          onClick={() => onAction('delete', file)}
-        >
-          <Trash2 className="mr-2 h-4 w-4" />
-          Delete
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  );
-}
-
 // ─── Main File Browser Page ──────────────────────────────────────────────────
 export default function FilesPage() {
   const { bucketId } = useParams();
@@ -501,12 +82,6 @@ export default function FilesPage() {
   const [sortKey, setSortKey] = useState('name');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(new Set());
-
-  // Dialogs
-  const [uploadOpen, setUploadOpen] = useState(false);
-  const [newFolderOpen, setNewFolderOpen] = useState(false);
-  const [renameOpen, setRenameOpen] = useState(false);
-  const [fileToRename, setFileToRename] = useState(null);
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchFiles = useCallback(async () => {
@@ -583,21 +158,6 @@ export default function FilesPage() {
     setSelected(prev => prev.size === currentFiles.length ? new Set() : new Set(currentFiles.map(f => f.id)));
   };
 
-  // ── Actions ──────────────────────────────────────────────────────────────
-  const handleAction = async (action, file) => {
-    if (action === 'rename') {
-      setFileToRename(file);
-      setRenameOpen(true);
-      return;
-    }
-    if (action === 'delete') {
-      if (!confirm(`Are you sure you want to delete "${file.name}"?`)) return;
-      alert('Delete functionality coming in next update.');
-      return;
-    }
-    // 'download' option removed — files already sync locally via SyncManager
-  };
-
   // Click folder → navigate in, click file → open with native app
   const handleItemClick = async (file) => {
     if (file.isFolder) {
@@ -625,7 +185,7 @@ export default function FilesPage() {
             onClick={() => navigateToBreadcrumb(0)}
             className="text-muted-foreground hover:text-foreground transition-colors font-medium"
           >
-            All Files
+            {bucketInfo?.name || "Bucket"}
           </button>
           {folderStack.map((segment, i) => (
             <React.Fragment key={i}>
@@ -677,26 +237,6 @@ export default function FilesPage() {
               <LayoutGrid className="h-4 w-4" />
             </Button>
           </div>
-
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            onClick={() => setNewFolderOpen(true)}
-            disabled={!bucketInfo}
-          >
-            <FolderPlus className="h-4 w-4" />
-            New Folder
-          </Button>
-          <Button
-            size="sm"
-            className="gap-1.5"
-            onClick={() => setUploadOpen(true)}
-            disabled={!bucketInfo}
-          >
-            <Upload className="h-4 w-4" />
-            Upload
-          </Button>
         </div>
       </div>
 
@@ -718,16 +258,6 @@ export default function FilesPage() {
       {selected.size > 0 && (
         <div className="flex items-center gap-3 text-sm">
           <span className="text-muted-foreground">{selected.size} selected</span>
-          <Button variant="outline" size="sm" className="h-7 text-xs">
-            <Download className="mr-1 h-3 w-3" /> Download
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-7 text-xs text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 className="mr-1 h-3 w-3" /> Delete
-          </Button>
         </div>
       )}
 
@@ -742,7 +272,7 @@ export default function FilesPage() {
           <HardDrive className="h-12 w-12 text-muted-foreground mb-4" />
           <p className="text-lg font-medium">No bucket selected</p>
           <p className="text-sm text-muted-foreground mt-1">Please select a bucket from the Buckets page to view files.</p>
-          <Button className="mt-4 gap-1.5" onClick={() => navigate('/')}>
+          <Button className="mt-4 gap-1.5" onClick={() => navigate('/buckets')}>
             <HardDrive className="h-4 w-4" /> Go to Buckets
           </Button>
         </div>
@@ -753,10 +283,7 @@ export default function FilesPage() {
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <FolderOpen className="h-12 w-12 text-muted-foreground mb-4" />
           <p className="text-lg font-medium">This folder is empty</p>
-          <p className="text-sm text-muted-foreground mt-1">Upload files or create a new folder to get started</p>
-          <Button className="mt-4 gap-1.5" onClick={() => setUploadOpen(true)}>
-            <Upload className="h-4 w-4" /> Upload Files
-          </Button>
+          <p className="text-sm text-muted-foreground mt-1">Files are synced from S3</p>
         </div>
       )}
 
@@ -776,8 +303,6 @@ export default function FilesPage() {
                 <TableHead>Name</TableHead>
                 <TableHead className="hidden md:table-cell">Size</TableHead>
                 <TableHead className="hidden lg:table-cell">Modified</TableHead>
-                <TableHead className="hidden lg:table-cell">Owner</TableHead>
-                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -807,12 +332,6 @@ export default function FilesPage() {
                   <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">
                     {formatDate(file.updatedAt)}
                   </TableCell>
-                  <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">
-                    Admin
-                  </TableCell>
-                  <TableCell onClick={e => e.stopPropagation()}>
-                    <FileContextMenu file={file} onAction={handleAction} />
-                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -834,9 +353,6 @@ export default function FilesPage() {
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
                     <FileIcon file={file} className="h-5 w-5" />
                   </div>
-                  <div onClick={e => e.stopPropagation()}>
-                    <FileContextMenu file={file} onAction={handleAction} />
-                  </div>
                 </div>
                 <div className="space-y-1">
                   <p className="text-sm font-medium truncate">{file.name}</p>
@@ -849,29 +365,6 @@ export default function FilesPage() {
           ))}
         </div>
       )}
-
-      {/* ── Dialogs ──────────────────────────────────────────────────────── */}
-      <FileUploadDialog
-        open={uploadOpen}
-        onOpenChange={setUploadOpen}
-        bucketInfo={bucketInfo}
-        folderStack={folderStack}
-      />
-
-      <NewFolderDialog
-        open={newFolderOpen}
-        onOpenChange={setNewFolderOpen}
-        bucketInfo={bucketInfo}
-        folderStack={folderStack}
-        onFolderCreated={fetchFiles}
-      />
-
-      <RenameDialog
-        open={renameOpen}
-        onOpenChange={setRenameOpen}
-        file={fileToRename}
-        onRenamed={fetchFiles}
-      />
     </div>
   );
 }

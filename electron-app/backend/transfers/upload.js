@@ -74,12 +74,12 @@ class UploadManager {
 
             await upload.done();
             statusManager.completeTransfer(transferId, 'done');
-            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'SUCCESS', null, this.currentConfigId, this.currentSyncJobId);
+            await syncHistory.logActivity('UPLOAD', s3Key || fileName, 'SUCCESS', null, this.currentConfigId, this.currentSyncJobId);
             return true;
         } catch (error) {
             console.error('[UploadManager] S3 Upload Error:', error.message);
             statusManager.completeTransfer(transferId, 'error');
-            await syncHistory.logActivity('UPLOAD', path.basename(filePath), 'FAILED', error.message, this.currentConfigId, this.currentSyncJobId);
+            await syncHistory.logActivity('UPLOAD', s3Key || fileName, 'FAILED', error.message, this.currentConfigId, this.currentSyncJobId);
             throw error;
         }
     }

@@ -1,12 +1,9 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { Button } from '../components/ui/button';
 import {
-  Table, TableBody, TableCell, TableHead,
-  TableHeader, TableRow,
-} from '../components/ui/table';
-import {
   RefreshCw, CheckCircle2, XCircle, Clock,
-  Archive, Download, Upload, History, Plus, Settings, FolderOpen, Trash2
+  Download, Upload, History, Plus, Settings, FolderOpen, Trash2,
+  ArrowDownCircle, ArrowUpCircle, Eye, Info, Radio, Pause, Play
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -17,7 +14,6 @@ export default function SyncPage() {
     
     const [configs, setConfigs] = useState([]);
     const [loading, setLoading] = useState(true);
-    const [search, setSearch] = useState('');
 
     const [buckets, setBuckets] = useState([]);
     
@@ -25,6 +21,8 @@ export default function SyncPage() {
     const [showModal, setShowModal] = useState(false);
     const [newConfigName, setNewConfigName] = useState('');
     const [newConfigInterval, setNewConfigInterval] = useState(5);
+    const [newDirection, setNewDirection] = useState('DOWNLOAD');
+    const [newUseWatcher, setNewUseWatcher] = useState(true);
     const [newMappings, setNewMappings] = useState([]); // {localPath, bucketId}
 
     // --- Fetchers ---
@@ -64,10 +62,36 @@ export default function SyncPage() {
         return () => clearInterval(interval);
     }, []);
 
+    const [isForceSyncing, setIsForceSyncing] = useState(false);
+
     const handleForceSync = async () => {
         if (window.electronAPI) {
+            setIsForceSyncing(true);
             await window.electronAPI.forceSync();
-            setTimeout(loadData, 3000);
+            setTimeout(() => {
+                loadData();
+                setIsForceSyncing(false);
+            }, 3000);
+        }
+    };
+
+    const [syncingConfigId, setSyncingConfigId] = useState(null);
+
+    const handleSyncConfigNow = async (configId) => {
+        if (!window.electronAPI?.syncConfigNow) return;
+        setSyncingConfigId(configId);
+        try {
+            const result = await window.electronAPI.syncConfigNow(configId);
+            if (!result.success) {
+                console.warn('Sync blocked:', result.error);
+            }
+            setTimeout(() => {
+                fetchConfigs();
+                setSyncingConfigId(null);
+            }, 4000);
+        } catch (err) {
+            console.error('Sync now failed', err);
+            setSyncingConfigId(null);
         }
     };
 
@@ -106,12 +130,16 @@ export default function SyncPage() {
             await window.electronAPI.createSyncConfig({
                 name: newConfigName,
                 intervalMinutes: parseInt(newConfigInterval),
+                direction: newDirection,
+                useWatcher: newDirection === 'UPLOAD' ? newUseWatcher : false,
                 mappings: newMappings
             });
             setShowModal(false);
             setNewConfigName('');
             setNewMappings([]);
             setNewConfigInterval(5);
+            setNewDirection('DOWNLOAD');
+            setNewUseWatcher(true);
             fetchConfigs();
         } catch (err) {
             console.error('Failed to save config', err);
@@ -126,6 +154,15 @@ export default function SyncPage() {
         } catch (err) {
             console.error('Failed to delete config', err);
         }
+    };
+
+    const openModal = () => {
+        setNewConfigName('');
+        setNewMappings([]);
+        setNewConfigInterval(5);
+        setNewDirection('DOWNLOAD');
+        setNewUseWatcher(true);
+        setShowModal(true);
     };
 
     // --- Helpers ---
@@ -148,14 +185,14 @@ export default function SyncPage() {
                 </nav>
                 
                 <div className="flex items-center gap-2">
-                    <Button size="sm" className="gap-1.5" onClick={() => setShowModal(true)}>
+                    <Button size="sm" className="gap-1.5" onClick={openModal}>
                         <Plus className="h-4 w-4" /> Add Sync Config
                     </Button>
                     <Button variant="outline" size="sm" className="gap-1.5" onClick={loadData} disabled={loading}>
                         <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
                     </Button>
-                    <Button variant="secondary" size="sm" className="gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100" onClick={handleForceSync}>
-                        <RefreshCw className="h-4 w-4" /> Sync Now
+                    <Button variant="secondary" size="sm" className="gap-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100" onClick={handleForceSync} disabled={isForceSyncing}>
+                        <RefreshCw className={`h-4 w-4 ${isForceSyncing ? 'animate-spin' : ''}`} /> {isForceSyncing ? 'Syncing...' : 'Sync All Now'}
                     </Button>
                 </div>
             </div>
@@ -173,51 +210,97 @@ export default function SyncPage() {
                                 <Settings className="h-12 w-12 text-slate-300 mb-4" />
                                 <p className="text-lg font-medium text-slate-800">No Sync Configurations Yet</p>
                                 <p className="text-sm text-slate-500 mt-1 max-w-sm">
-                                    Create a sync configuration to map multiple local folders to multiple cloud buckets, and schedule automatic syncs.
+                                    Create a sync configuration to map local folders to cloud buckets. Choose between uploading to the cloud or downloading from it.
                                 </p>
-                                <Button className="mt-6 gap-1.5" onClick={() => setShowModal(true)}>
+                                <Button className="mt-6 gap-1.5" onClick={openModal}>
                                     <Plus className="h-4 w-4" /> Create First Config
                                 </Button>
                             </div>
                         )}
 
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                            {configs.map(config => (
-                                <div key={config.id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative group">
-                                    <div className="flex justify-between items-start mb-3">
-                                        <div>
-                                            <h3 className="font-semibold text-slate-900 text-base">{config.name}</h3>
-                                            <p className="text-xs text-slate-500 mt-0.5 flex items-center gap-1">
-                                                <Clock className="h-3 w-3" /> Runs every {config.intervalMinutes}m
-                                            </p>
-                                        </div>
-                                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <button onClick={() => handleDeleteConfig(config.id)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md transition-colors" title="Delete Config">
-                                                <Trash2 className="h-4 w-4" />
-                                            </button>
-                                        </div>
-                                    </div>
+                            {configs.map(config => {
+                                const direction = config.direction || 'DOWNLOAD';
+                                const isUpload = direction === 'UPLOAD';
+                                const isSyncing = config.isSyncing || syncingConfigId === config.id;
+                                const watcherActive = isUpload && config.useWatcher;
 
-                                    <div className="bg-slate-50 rounded-lg p-3 my-4 max-h-[140px] overflow-y-auto space-y-2 border border-slate-100">
-                                        <div className="text-xs font-semibold text-slate-500 mb-1">MAPPED FOLDERS ({config.mappings?.length || 0})</div>
-                                        {config.mappings?.map(map => (
-                                            <div key={map.id} className="text-xs flex flex-col gap-0.5 text-slate-700 bg-white p-2 rounded border border-slate-100 shadow-sm">
-                                                <div className="font-medium truncate tracking-tight text-[11px] text-blue-600">S3: {buckets.find(b=>b.id === map.bucketId)?.name || map.bucketId}</div>
-                                                <div className="truncate text-slate-500" title={map.localPath}>Local: {map.localPath}</div>
+                                return (
+                                    <div key={config.id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative group">
+                                        <div className="flex justify-between items-start mb-3">
+                                            <div className="flex items-center gap-2">
+                                                {/* Direction badge */}
+                                                <div className={`p-1.5 rounded-lg ${isUpload ? 'bg-amber-50' : 'bg-emerald-50'}`}>
+                                                    {isUpload 
+                                                        ? <ArrowUpCircle className="h-4 w-4 text-amber-600" />
+                                                        : <ArrowDownCircle className="h-4 w-4 text-emerald-600" />
+                                                    }
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-semibold text-slate-900 text-base">{config.name}</h3>
+                                                    <div className="flex items-center gap-2 mt-0.5">
+                                                        <p className="text-xs text-slate-500 flex items-center gap-1">
+                                                            <Clock className="h-3 w-3" /> Every {config.intervalMinutes}m
+                                                        </p>
+                                                        <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${isUpload ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
+                                                            {isUpload ? '⬆ Upload' : '⬇ Download'}
+                                                        </span>
+                                                        {watcherActive && (
+                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-600">
+                                                                <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
+                                                                Watcher
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
                                             </div>
-                                        ))}
-                                    </div>
+                                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button onClick={() => handleDeleteConfig(config.id)} className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-md transition-colors" title="Delete Config">
+                                                    <Trash2 className="h-4 w-4" />
+                                                </button>
+                                            </div>
+                                        </div>
 
-                                    <div className="flex items-center justify-between mt-auto">
-                                        <p className="text-xs text-slate-400">
-                                            Last run: {formatDate(config.lastSync)}
-                                        </p>
-                                        <Button size="sm" variant="outline" className="h-7 text-xs px-3 bg-white" onClick={() => navigate(`/sync/${config.id}`)}>
-                                            <History className="h-3 w-3 mr-1" /> View History
-                                        </Button>
+                                        <div className="bg-slate-50 rounded-lg p-3 my-4 max-h-[140px] overflow-y-auto space-y-2 border border-slate-100">
+                                            <div className="text-xs font-semibold text-slate-500 mb-1">MAPPED FOLDERS ({config.mappings?.length || 0})</div>
+                                            {config.mappings?.map(map => (
+                                                <div key={map.id} className="text-xs flex flex-col gap-0.5 text-slate-700 bg-white p-2 rounded border border-slate-100 shadow-sm">
+                                                    <div className="font-medium truncate tracking-tight text-[11px] text-blue-600">S3: {buckets.find(b=>b.id === map.bucketId)?.name || map.bucketId}</div>
+                                                    <div className="truncate text-slate-500" title={map.localPath}>Local: {map.localPath}</div>
+                                                </div>
+                                            ))}
+                                        </div>
+
+                                        <div className="flex items-center justify-between mt-auto">
+                                            <div className="flex flex-col">
+                                                <p className="text-xs text-slate-400">
+                                                    Last run: {formatDate(config.lastSync)}
+                                                </p>
+                                                {isSyncing && (
+                                                    <p className="text-[10px] text-blue-600 font-semibold flex items-center gap-1 mt-0.5">
+                                                        <RefreshCw className="h-2.5 w-2.5 animate-spin" /> Syncing...
+                                                    </p>
+                                                )}
+                                            </div>
+                                            <div className="flex items-center gap-1.5">
+                                                <Button 
+                                                    size="sm" 
+                                                    variant="outline" 
+                                                    className="h-7 text-xs px-3 bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200" 
+                                                    onClick={() => handleSyncConfigNow(config.id)}
+                                                    disabled={isSyncing}
+                                                >
+                                                    <RefreshCw className={`h-3 w-3 mr-1 ${isSyncing ? 'animate-spin' : ''}`} />
+                                                    {isSyncing ? 'Syncing...' : 'Sync Now'}
+                                                </Button>
+                                                <Button size="sm" variant="outline" className="h-7 text-xs px-3 bg-white" onClick={() => navigate(`/sync/${config.id}`)}>
+                                                    <History className="h-3 w-3 mr-1" /> History
+                                                </Button>
+                                            </div>
+                                        </div>
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                     </div>
                 </div>
@@ -234,6 +317,7 @@ export default function SyncPage() {
                         </div>
                         
                         <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                            {/* Config Name + Interval */}
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1.5">
                                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Configuration Name</label>
@@ -246,7 +330,7 @@ export default function SyncPage() {
                                     />
                                 </div>
                                 <div className="space-y-1.5">
-                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Sync Interval (Minutes)</label>
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Sync Interval</label>
                                     <select 
                                         className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none transition-all bg-white"
                                         value={newConfigInterval}
@@ -255,12 +339,101 @@ export default function SyncPage() {
                                         <option value="1">1 minute (Aggressive)</option>
                                         <option value="5">5 minutes (Default)</option>
                                         <option value="15">15 minutes (Standard)</option>
+                                        <option value="30">30 minutes</option>
                                         <option value="60">1 hour (Relaxed)</option>
                                         <option value="1440">Daily (24 hours)</option>
                                     </select>
                                 </div>
                             </div>
 
+                            {/* Direction Toggle */}
+                            <div className="space-y-3">
+                                <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Sync Direction</label>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={() => { setNewDirection('DOWNLOAD'); setNewUseWatcher(false); }}
+                                        className={`relative flex flex-col gap-1.5 p-4 rounded-xl border-2 transition-all text-left ${
+                                            newDirection === 'DOWNLOAD' 
+                                                ? 'border-emerald-500 bg-emerald-50/50 shadow-sm shadow-emerald-100' 
+                                                : 'border-slate-200 bg-white hover:border-slate-300'
+                                        }`}
+                                    >
+                                        {newDirection === 'DOWNLOAD' && (
+                                            <div className="absolute top-2.5 right-2.5">
+                                                <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                                            </div>
+                                        )}
+                                        <div className="flex items-center gap-2">
+                                            <ArrowDownCircle className={`h-5 w-5 ${newDirection === 'DOWNLOAD' ? 'text-emerald-600' : 'text-slate-400'}`} />
+                                            <span className={`font-semibold text-sm ${newDirection === 'DOWNLOAD' ? 'text-emerald-800' : 'text-slate-700'}`}>
+                                                Download from Cloud
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-500 leading-relaxed">
+                                            Mirrors cloud files to your PC. Files deleted in the cloud will <strong>not</strong> be deleted from your local folder.
+                                        </p>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        onClick={() => { setNewDirection('UPLOAD'); setNewUseWatcher(true); }}
+                                        className={`relative flex flex-col gap-1.5 p-4 rounded-xl border-2 transition-all text-left ${
+                                            newDirection === 'UPLOAD' 
+                                                ? 'border-amber-500 bg-amber-50/50 shadow-sm shadow-amber-100' 
+                                                : 'border-slate-200 bg-white hover:border-slate-300'
+                                        }`}
+                                    >
+                                        {newDirection === 'UPLOAD' && (
+                                            <div className="absolute top-2.5 right-2.5">
+                                                <CheckCircle2 className="h-4 w-4 text-amber-500" />
+                                            </div>
+                                        )}
+                                        <div className="flex items-center gap-2">
+                                            <ArrowUpCircle className={`h-5 w-5 ${newDirection === 'UPLOAD' ? 'text-amber-600' : 'text-slate-400'}`} />
+                                            <span className={`font-semibold text-sm ${newDirection === 'UPLOAD' ? 'text-amber-800' : 'text-slate-700'}`}>
+                                                Upload to Cloud
+                                            </span>
+                                        </div>
+                                        <p className="text-xs text-slate-500 leading-relaxed">
+                                            Sends local files to the cloud bucket. New and changed files are automatically synced.
+                                        </p>
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Watcher Toggle (Upload only) */}
+                            {newDirection === 'UPLOAD' && (
+                                <div className="space-y-2">
+                                    <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Upload Trigger</label>
+                                    <div className="flex items-center gap-3 bg-slate-50 rounded-lg p-3 border border-slate-200">
+                                        <button
+                                            type="button"
+                                            onClick={() => setNewUseWatcher(!newUseWatcher)}
+                                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                                newUseWatcher ? 'bg-blue-600' : 'bg-slate-300'
+                                            }`}
+                                        >
+                                            <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                newUseWatcher ? 'translate-x-5' : 'translate-x-0'
+                                            }`} />
+                                        </button>
+                                        <div>
+                                            <p className="text-sm font-medium text-slate-700">
+                                                {newUseWatcher ? 'Real-time Watcher Enabled' : 'Interval-Only Mode'}
+                                            </p>
+                                            <p className="text-xs text-slate-500 mt-0.5">
+                                                {newUseWatcher 
+                                                    ? 'Files are uploaded immediately when added or changed. 2-second debounce applied.' 
+                                                    : `Files will be scanned every ${newConfigInterval} minute(s) and uploaded if changed.`
+                                                }
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Mapped Folders */}
                             <div className="space-y-3">
                                 <div className="flex items-center justify-between">
                                     <label className="text-xs font-bold text-slate-500 uppercase tracking-wide">Mapped Folders ({newMappings.length})</label>
@@ -309,6 +482,14 @@ export default function SyncPage() {
                                         </button>
                                     </div>
                                 ))}
+                            </div>
+
+                            {/* Safety Info */}
+                            <div className="flex items-start gap-2.5 bg-blue-50/50 border border-blue-100 rounded-lg p-3">
+                                <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
+                                <p className="text-xs text-blue-700 leading-relaxed">
+                                    <strong>ETag Verification:</strong> The sync engine uses MD5 checksums (ETags) and file size to verify only changed files are transferred. This prevents duplicate uploads and unnecessary downloads.
+                                </p>
                             </div>
                         </div>
 

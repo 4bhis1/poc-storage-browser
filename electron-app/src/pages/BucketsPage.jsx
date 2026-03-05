@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Input } from '../components/ui/input';
-import { Globe, HardDrive, Lock, RefreshCw, Database } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Globe, HardDrive, Lock, RefreshCw, FolderOpen, MoreHorizontal, Settings, Shield } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { DataTable } from '../components/ui/data-table';
+import { Badge } from '../components/ui/badge';
+import { Progress } from '../components/ui/progress';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '../components/ui/dropdown-menu';
 
 const storageClassColors = {
   STANDARD:    "bg-emerald-500/10 text-emerald-600",
@@ -26,11 +28,18 @@ function formatBytes(bytes) {
   return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i];
 }
 
+const formatDate = (dateString) => {
+  const d = new Date(dateString);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+};
+
 export default function BucketsPage() {
+  const navigate = useNavigate();
   const [buckets, setBuckets] = useState([]);
   const [bucketStats, setBucketStats] = useState({}); // bucketId → { count, size }
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
+  const [syncing, setSyncing] = useState(null);
 
   const fetchBuckets = async () => {
     setLoading(true);
@@ -68,131 +77,166 @@ export default function BucketsPage() {
     }
   };
 
+  const handleSync = async (bucketId) => {
+    setSyncing(bucketId);
+    try {
+      if (window.electronAPI?.syncBucketsNow) {
+        // Assume global sync for now if specific bucket sync is not available on client
+        await window.electronAPI.syncBucketsNow();
+      }
+    } catch (err) {
+      console.error('Failed to sync bucket:', err);
+    } finally {
+      setSyncing(null);
+      fetchBuckets();
+    }
+  };
+
   useEffect(() => {
     fetchBuckets();
     const interval = setInterval(fetchBuckets, 10000);
     return () => clearInterval(interval);
   }, []);
 
-  const formatDate = (dateString) => {
-    const d = new Date(dateString);
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-  };
+  const data = buckets.map(b => {
+    const st = bucketStats[b.id] || { count: 0, size: 0 };
+    return {
+      ...b,
+      fileCount: st.count,
+      totalSize: st.size,
+      maxSize: b.maxSize || 107374182400 // 100GB dummy fallback for UI
+    };
+  });
 
-  const filteredBuckets = buckets.filter(b =>
-    b.name?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const columns = [
+    {
+      header: "Bucket Name",
+      accessorKey: "name",
+      cell: (bucket) => (
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 shrink-0 border border-blue-100">
+            <HardDrive className="h-5 w-5 text-blue-600" />
+          </div>
+          <div className="flex flex-col truncate">
+            <span className="font-semibold text-slate-900">{bucket.name}</span>
+            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500">
+              <Globe className="h-3 w-3" />
+              <span>{bucket.region}</span>
+            </div>
+          </div>
+        </div>
+      )
+    },
+    {
+      header: "Storage Class & Settings",
+      accessorKey: "storageClass",
+      className: "hidden md:table-cell",
+      cell: (bucket) => (
+        <div className="flex items-center gap-2 flex-wrap">
+          <Badge variant="secondary" className={storageClassColors[bucket.storageClass] || "bg-slate-100 text-slate-700 font-medium"}>
+            {storageClassLabels[bucket.storageClass] || bucket.storageClass || 'Standard'}
+          </Badge>
+          {bucket.encryption && (
+            <Badge variant="secondary" className="gap-1 bg-slate-50 text-[10px] py-0 h-5 border border-slate-200 text-slate-600 font-medium tracking-wide shadow-sm">
+              <Lock className="h-2.5 w-2.5" /> Encrypted
+            </Badge>
+          )}
+          {bucket.versioning && (
+            <Badge variant="secondary" className="gap-1 bg-slate-50 text-[10px] py-0 h-5 border border-slate-200 text-slate-600 font-medium tracking-wide shadow-sm">
+              <Shield className="h-2.5 w-2.5" /> Versioned
+            </Badge>
+          )}
+        </div>
+      )
+    },
+    {
+      header: "Usage",
+      accessorKey: "totalSize",
+      cell: (bucket) => {
+        const usagePercent = bucket.maxSize ? Math.round((bucket.totalSize / bucket.maxSize) * 100) : 0;
+        return (
+          <div className="space-y-1.5 w-full min-w-[120px] max-w-[200px]">
+             <div className="flex items-center justify-between text-xs">
+               <span className="text-slate-500 font-medium">
+                 {formatBytes(bucket.totalSize)} of {formatBytes(bucket.maxSize)}
+               </span>
+               <span className="text-slate-700 font-semibold">{usagePercent}%</span>
+             </div>
+             <Progress value={usagePercent} className="h-1.5 bg-slate-100" />
+          </div>
+        );
+      }
+    },
+    {
+      header: "Files",
+      accessorKey: "fileCount",
+      className: "hidden lg:table-cell text-slate-500 font-medium",
+      cell: (bucket) => <span>{(bucket.fileCount || 0).toLocaleString()}</span>
+    },
+    {
+      header: "Created",
+      accessorKey: "createdAt",
+      className: "hidden lg:table-cell text-slate-500",
+      cell: (bucket) => <span className="text-sm font-medium">{formatDate(bucket.createdAt)}</span>
+    },
+    {
+      header: "",
+      accessorKey: "actions",
+      className: "w-10",
+      cell: (bucket) => (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8 focus-visible:ring-0" onClick={(e) => e.stopPropagation()}>
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48 bg-white border-slate-200 shadow-md">
+            <DropdownMenuItem asChild className="cursor-pointer text-sm font-medium text-slate-700">
+              <Link to={`/files/${bucket.id}`}>
+                <FolderOpen className="mr-2 h-4 w-4 text-blue-500" /> Browse Files
+              </Link>
+            </DropdownMenuItem>
+            
+            <DropdownMenuItem onClick={(e) => { e.stopPropagation(); handleSync(bucket.id); }} disabled={syncing === bucket.id} className="cursor-pointer text-sm font-medium text-slate-700">
+              <RefreshCw className={`mr-2 h-4 w-4 text-emerald-500 ${syncing === bucket.id ? 'animate-spin' : ''}`} /> Force Sync Files
+            </DropdownMenuItem>
+            
+            <DropdownMenuSeparator />
+            <DropdownMenuItem disabled className="cursor-pointer text-sm font-medium text-slate-500">
+              <Settings className="mr-2 h-4 w-4" /> Edit Settings
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )
+    }
+  ];
 
   return (
-    <div className="flex flex-col h-full bg-white">
-      <div className="flex-1 overflow-auto bg-white p-6">
-        <div className="space-y-6">
-          {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-            <div className="flex items-center gap-2 text-2xl font-normal text-slate-800 tracking-tight">
-              <HardDrive className="h-6 w-6 text-blue-500" />
-              Buckets
-            </div>
+    <div className="flex flex-col h-full bg-slate-50/50">
+      <div className="flex-1 overflow-auto p-6 space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Buckets</h1>
+            <p className="text-slate-500 mt-1">
+              Manage your synced S3 storage buckets locally.
+            </p>
           </div>
+        </div>
 
-          {/* Controls */}
-          <div className="flex justify-between items-center gap-4 flex-wrap">
-            <div className="flex-1 min-w-[200px] max-w-sm">
-              <Input
-                placeholder="Search buckets..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <Button variant="outline" size="icon" onClick={fetchBuckets}>
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            </Button>
-          </div>
-
-          {/* Loading skeleton */}
-          {loading && buckets.length === 0 && (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="h-44 bg-slate-100 rounded-xl animate-pulse" />
-              ))}
-            </div>
-          )}
-
-          {/* Empty state */}
-          {filteredBuckets.length === 0 && !loading ? (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <Database className="h-12 w-12 text-slate-300 mb-4" />
-              <p className="text-lg font-medium text-slate-700">No buckets found locally</p>
-              <p className="text-sm text-slate-400 mt-1">Waiting for the first sync with the cloud…</p>
-              <Button className="mt-5 gap-1.5" variant="outline" onClick={fetchBuckets}>
-                <RefreshCw className="h-4 w-4" /> Retry
+        <div className="bg-white rounded-xl border border-slate-200/60 shadow-sm p-5">
+          <DataTable
+            data={data.filter(b => b.name?.toLowerCase().includes(searchQuery.toLowerCase()))}
+            columns={columns}
+            searchPlaceholder="Search buckets by name..."
+            onSearch={setSearchQuery}
+            onRowClick={(bucket) => navigate(`/files/${bucket.id}`)}
+            actions={
+              <Button variant="outline" size="sm" onClick={fetchBuckets} className="h-9 gap-1.5 font-medium shadow-sm" disabled={loading}>
+                <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+                Refresh
               </Button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {filteredBuckets.map((bucket) => {
-                const st = bucketStats[bucket.id] || { count: 0, size: 0 };
-                // Compute % of total aggregate size for the progress bar
-                const totalAll = Object.values(bucketStats).reduce((s, v) => s + v.size, 0);
-                const pct = totalAll > 0 ? Math.round((st.size / totalAll) * 100) : 0;
-
-                return (
-                  <Link key={bucket.id} to={`/files/${bucket.id}`} className="block h-full">
-                    <Card className="h-full border border-slate-200 hover:border-blue-200 hover:shadow-md transition-all duration-200 cursor-pointer shadow-sm">
-                      <CardHeader className="flex flex-row items-start justify-between pb-2 p-5 w-full">
-                        <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 shrink-0">
-                            <HardDrive className="h-5 w-5 text-blue-600" />
-                          </div>
-                          <div className="min-w-0">
-                            <CardTitle className="text-base font-semibold text-slate-900 truncate">
-                              {bucket.name}
-                            </CardTitle>
-                            <div className="flex items-center gap-1.5 mt-0.5 text-slate-500">
-                              <Globe className="h-3 w-3 shrink-0" />
-                              <span className="text-xs">{bucket.region}</span>
-                            </div>
-                          </div>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="p-5 pt-0 space-y-3">
-                        {/* Badges */}
-                        <div className="flex items-center gap-2 text-xs flex-wrap">
-                          <span className={`px-2.5 py-0.5 rounded-full font-medium ${storageClassColors[bucket.storageClass] || 'bg-slate-100 text-slate-700'}`}>
-                            {storageClassLabels[bucket.storageClass] || 'Standard'}
-                          </span>
-                          {bucket.encryption && (
-                            <span className="px-2.5 py-0.5 rounded-full font-medium bg-slate-100 flex items-center gap-1 text-slate-700">
-                              <Lock className="h-3 w-3" /> Encrypted
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Storage bar */}
-                        <div className="space-y-1.5">
-                          <div className="flex items-center justify-between text-xs">
-                            <span className="text-slate-500">{st.count} file{st.count !== 1 ? 's' : ''}</span>
-                            <span className="text-slate-700 font-medium">{formatBytes(st.size)}</span>
-                          </div>
-                          <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-blue-500 rounded-full transition-all duration-700"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between text-xs text-slate-400 pt-1">
-                          <span>{pct}% of total</span>
-                          <span>Created {formatDate(bucket.createdAt)}</span>
-                        </div>
-                      </CardContent>
-                    </Card>
-                  </Link>
-                );
-              })}
-            </div>
-          )}
+            }
+          />
         </div>
       </div>
     </div>

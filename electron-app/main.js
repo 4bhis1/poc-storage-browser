@@ -4,7 +4,60 @@ const path = require('path');
 const chokidar = require('chokidar');
 const si = require('systeminformation');
 const backend = require('./backend');
+const authManager = require('./backend/auth');
 const { registerIpcHandlers } = require('./main/ipcHandlers');
+
+// ── Deep-link / Protocol handler ──────────────────────────────────────────
+// Register cloudvault:// as the app's custom protocol (must be done before
+// app.whenReady and before any second-instance event fires).
+app.setAsDefaultProtocolClient('cloudvault');
+
+/**
+ * Parse a cloudvault://auth?token=<idToken>&refresh=<refreshToken> URL,
+ * persist the tokens, and notify the renderer so it can update the UI.
+ */
+function handleDeepLink(url) {
+  if (!url || !url.startsWith('cloudvault://')) return;
+  try {
+    const parsed = new URL(url);
+    const idToken      = parsed.searchParams.get('token');
+    const refreshToken = parsed.searchParams.get('refresh');
+    if (!idToken || !refreshToken) return;
+
+    // Decode email/username from the IdToken payload (no signature verify needed)
+    let email = '';
+    try {
+      const payload = JSON.parse(Buffer.from(idToken.split('.')[1], 'base64').toString());
+      email = payload.email || payload['cognito:username'] || '';
+    } catch {}
+
+    authManager.login({ idToken, accessToken: idToken, refreshToken, username: email, email });
+
+    if (mainWindow) {
+      mainWindow.webContents.send('sso-auth-result', { idToken, refreshToken, email });
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  } catch (err) {
+    console.error('[DeepLink] Parse error:', err.message);
+  }
+}
+
+// macOS: fires when the OS passes a URL to the *already running* instance
+app.on('open-url', (event, url) => {
+  event.preventDefault();
+  handleDeepLink(url);
+});
+
+// Windows/Linux: handle deep link from second-instance argv
+app.on('second-instance', (_event, argv) => {
+  const url = argv.find(a => a.startsWith('cloudvault://'));
+  if (url) handleDeepLink(url);
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  }
+});
 
 const ROOT_PATH = process.env.ROOT_PATH || path.join(app.getPath('home'), 'FMS');
 
@@ -15,8 +68,19 @@ let statsIntervals = [];
 function createWindow() {
   mainWindow = new BrowserWindow({
     title: 'Cloud Vault',
-    width: 1200, height: 800,
+    width: 1400, 
+    height: 800,
     autoHideMenuBar: true,
+    
+    // 1. Disables the Maximize button (Windows/Linux) or Green Zoom button (macOS)
+    maximizable: false, 
+    
+    // 2. Prevents users from dragging the edges to resize the window
+    resizable: false,   
+    
+    // 3. Prevents the window from entering macOS Fullscreen mode
+    fullscreenable: false, 
+
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -29,11 +93,12 @@ function createWindow() {
   mainWindow.loadURL('http://localhost:5173');
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-    mainWindow.maximize(); 
   });
 
-  // Initialize status manager with main window
+  // Initialize status and history managers with main window
   backend.status.init(mainWindow);
+  const syncHistory = require('./backend/syncHistory');
+  syncHistory.initUI(mainWindow);
 
   startMonitoring();
   mainWindow.on('closed', () => {
@@ -80,7 +145,7 @@ app.whenReady().then(async () => {
   if (!fs.existsSync(ROOT_PATH)) fs.mkdirSync(ROOT_PATH, { recursive: true });
 
   // 3. Setup File Watcher
-  watcher = chokidar.watch(ROOT_PATH, { 
+  watcher = chokidar.watch([], { 
     ignored: /(^|[\/\\])\../, 
     persistent: true, 
     ignoreInitial: true,
@@ -91,12 +156,21 @@ app.whenReady().then(async () => {
     }
   });
 
+  // Query DB for active watch paths (only UPLOAD configs with watcher enabled)
+  try {
+     const watchConfigs = await backend.db.query('SELECT m."localPath" FROM "SyncMapping" m JOIN "SyncConfig" c ON m."configId" = c.id WHERE c."useWatcher" = true AND c."direction" = \'UPLOAD\'');
+     watchConfigs.rows.forEach(r => watcher.add(r.localPath));
+     console.log(`[Watcher] Initialized with ${watchConfigs.rows.length} active upload paths.`);
+  } catch(e) {
+     console.error('[Watcher] Failed to load active paths:', e.message);
+  }
+
   // Shared guard sets
   const uploadInProgress = new Set(); // prevent concurrent re-upload of same file
   const downloadingPaths = new Set(); // files being downloaded by SyncManager — watcher must skip these
 
-  backend.sync.addWatcherPath = (folderPath) => {
-    if (watcher) {
+  backend.sync.addWatcherPath = (folderPath, useWatcher = true) => {
+    if (watcher && useWatcher) {
         console.log('[Watcher] Adding path to watch:', folderPath);
         watcher.add(folderPath);
     }

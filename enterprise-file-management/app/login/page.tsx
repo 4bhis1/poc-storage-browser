@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
@@ -24,6 +24,8 @@ export default function LoginPage() {
     const [showPassword, setShowPassword] = React.useState(false);
     const [showNewPassword, setShowNewPassword] = React.useState(false);
     const router = useRouter();
+    const searchParams = useSearchParams();
+    const redirectAfterLogin = searchParams.get('redirect') || null;
 
     const handleLogin = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -53,9 +55,9 @@ export default function LoginPage() {
                             policies: data.policies || [],
                             teams: data.teams || [],
                         };
-                        login(data.accessToken, userData, data.role === 'PLATFORM_ADMIN' ? '/superadmin' : '/');
+                        login(data.accessToken, userData, redirectAfterLogin || (data.role === 'PLATFORM_ADMIN' ? '/superadmin' : '/'));
                     } else {
-                        router.push(data.role === 'PLATFORM_ADMIN' ? '/superadmin' : '/');
+                        router.push(redirectAfterLogin || (data.role === 'PLATFORM_ADMIN' ? '/superadmin' : '/'));
                     }
                 } else {
                     setError(data.error || 'Failed to update password');
@@ -85,7 +87,10 @@ export default function LoginPage() {
                                 policies: data.policies || [],
                                 teams: data.teams || [],
                             };
-                            login(data.accessToken, userData, data.role === 'PLATFORM_ADMIN' ? '/superadmin' : '/');
+                            // If the login was triggered by the Electron SSO button, redirect
+                            // back to /api/auth/agent-sso so it can issue the cloudvault:// link
+                            const dest = redirectAfterLogin || (data.role === 'PLATFORM_ADMIN' ? '/superadmin' : '/');
+                            login(data.accessToken, userData, dest);
                         } else {
                             router.push(data.role === 'PLATFORM_ADMIN' ? '/superadmin' : '/');
                         }

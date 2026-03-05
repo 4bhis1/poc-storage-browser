@@ -13,6 +13,7 @@ import TransferStatus from "./components/TransferStatus";
 import DashboardPage from "./pages/DashboardPage";
 import BucketsPage from "./pages/BucketsPage";
 import FilesPage from "./pages/FilesPage";
+import ExplorerPage from "./pages/ExplorerPage";
 import SyncPage from "./pages/SyncPage";
 import SyncHistoryPage from "./pages/SyncHistoryPage";
 import RecentActivitiesPage from "./pages/RecentActivitiesPage";
@@ -41,6 +42,7 @@ const Layout = () => {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/buckets" element={<BucketsPage />} />
             <Route path="/files/:bucketId" element={<FilesPage />} />
+            <Route path="/explorer" element={<ExplorerPage />} />
             <Route path="/sync" element={<SyncPage />} />
             <Route path="/sync/:configId" element={<SyncHistoryPage />} />
             <Route path="/recent" element={<RecentActivitiesPage />} />

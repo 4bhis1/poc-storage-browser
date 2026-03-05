@@ -21,6 +21,7 @@ class BackendCentral {
         this.sync = syncManager;
         this.auth = require('./auth');
         this.delete = deleteManager;
+        this.queue = require('./transfers/queue');
     }
 
     /**
@@ -40,8 +41,8 @@ class BackendCentral {
                 return;
             }
 
-            console.log(`[Watcher] Auto-uploading to S3: bucket=${bucketId}, key=${s3Key}, configId=${configId}`);
-            await this.upload.uploadWithBucketId(bucketId, filePath, s3Key, null, configId);
+            console.log(`[Watcher] Auto-uploading to S3 (Queued): bucket=${bucketId}, key=${s3Key}, configId=${configId}`);
+            this.queue.addUploadTask(bucketId, filePath, s3Key, null, configId);
         } catch (err) {
             console.error('[Watcher] Auto-upload failed:', err.message);
         }

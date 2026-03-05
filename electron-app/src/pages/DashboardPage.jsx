@@ -209,10 +209,16 @@ export default function DashboardPage() {
   const diskPct = diskStats ? Math.round((diskStats.used / diskStats.total) * 100) : 0;
   const diskBarColor = diskPct > 85 ? 'bg-rose-500' : diskPct > 65 ? 'bg-amber-500' : 'bg-blue-500';
 
+  const [isForceSyncing, setIsForceSyncing] = useState(false);
+
   const handleForceSync = async () => {
     if (window.electronAPI) {
+      setIsForceSyncing(true);
       await window.electronAPI.forceSync();
-      setTimeout(fetchAll, 3000);
+      setTimeout(() => {
+        fetchAll();
+        setIsForceSyncing(false);
+      }, 3000);
     }
   };
 
@@ -229,9 +235,9 @@ export default function DashboardPage() {
             <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
             Refresh
           </Button>
-          <Button size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 shadow-sm" onClick={handleForceSync}>
-            <Zap className="h-3.5 w-3.5" />
-            Sync Now
+          <Button size="sm" className="gap-1.5 bg-blue-600 hover:bg-blue-700 shadow-sm" onClick={handleForceSync} disabled={isForceSyncing}>
+            {isForceSyncing ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+            {isForceSyncing ? 'Syncing...' : 'Sync Now'}
           </Button>
         </div>
       </div>
@@ -332,16 +338,26 @@ export default function DashboardPage() {
                 {syncConfigs.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-2 italic">No sync configs yet</p>
                 ) : (
-                  syncConfigs.map(cfg => (
+                  syncConfigs.map(cfg => {
+                    const isUpload = cfg.direction === 'UPLOAD';
+                    const watcherActive = isUpload && cfg.useWatcher;
+                    return (
                     <button
                       key={cfg.id}
                       onClick={() => navigate(`/sync/${cfg.id}`)}
                       className="w-full flex items-center justify-between text-xs bg-slate-50 hover:bg-slate-100 rounded-lg px-3 py-2 transition-colors"
                     >
-                      <span className="font-medium text-slate-700 truncate mr-2">{cfg.name}</span>
+                      <span className="flex items-center gap-1.5 font-medium text-slate-700 truncate mr-2">
+                        <span className={`text-[10px] ${isUpload ? 'text-amber-600' : 'text-emerald-600'}`}>
+                          {isUpload ? '⬆' : '⬇'}
+                        </span>
+                        {cfg.name}
+                        {watcherActive && <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />}
+                      </span>
                       <span className="text-slate-400 shrink-0">every {cfg.intervalMinutes}m</span>
                     </button>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

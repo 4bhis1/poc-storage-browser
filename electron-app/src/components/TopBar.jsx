@@ -176,23 +176,35 @@ const TopBar = () => {
             {/* Right: Stats & User */}
             <div className="flex items-center gap-5 shrink-0 pr-3">
                 {/* Network & Disk */}
-                <div className="hidden lg:flex items-center gap-5 mr-2">
-                    <div className="flex flex-col items-end leading-none justify-center items-center w-15" title="Download Speed">
-                        <span className="text-[10px] text-slate-500 uppercase font-semibold">Down</span>
-                        <div className="flex items-center gap-1 text-slate-700 font-mono text-xs">
-                           <ArrowDown size={12} className="text-emerald-500"/> {formatSpeed(networkStats?.down || 0)}
+                <div className="hidden lg:flex items-center gap-6 mr-4 bg-white/50 px-4 py-1.5 rounded-full border border-slate-200/60 shadow-sm">
+                    <div className="flex items-center gap-3">
+                        <div className="flex flex-col items-center leading-tight min-w-[70px]">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tighter">Download</span>
+                            <div className="flex items-center gap-1 text-slate-700 font-mono text-xs font-semibold">
+                                <ArrowDown size={12} className="text-emerald-500" />
+                                <span>{formatSpeed(networkStats?.down || 0)}</span>
+                            </div>
+                        </div>
+                        <div className="w-px h-6 bg-slate-200"></div>
+                        <div className="flex flex-col items-center leading-tight min-w-[70px]">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tighter">Upload</span>
+                            <div className="flex items-center gap-1 text-slate-700 font-mono text-xs font-semibold">
+                                <ArrowUp size={12} className="text-blue-500" />
+                                <span>{formatSpeed(networkStats?.up || 0)}</span>
+                            </div>
                         </div>
                     </div>
-                    <div className="flex flex-col items-end leading-none justify-center items-center w-15" title="Upload Speed">
-                        <span className="text-[10px] text-slate-500 uppercase font-semibold">Up</span>
-                        <div className="flex items-center gap-1 text-slate-700 font-mono text-xs">
-                           <ArrowUp size={12} className="text-blue-500"/> {formatSpeed(networkStats?.up || 0)}
+
+                    <div className="w-px h-8 bg-slate-200 mx-1"></div>
+
+                    <div className="flex items-center gap-2 text-slate-600" title="Disk Usage">
+                        <div className="p-1 px-1.5 bg-slate-100 rounded-md">
+                            <HardDrive size={14} className="text-slate-500" />
                         </div>
-                    </div>
-                    <div className="h-8 w-px bg-slate-200 ml-1"></div>
-                    <div className="flex items-center gap-1.5 text-slate-600 ml-1" title="Storage Usage">
-                        <HardDrive size={16} />
-                        <span className="text-xs font-semibold">{diskUsagePercent}%</span>
+                        <div className="flex flex-col leading-none">
+                            <span className="text-[9px] text-slate-400 uppercase font-bold tracking-tighter">Storage</span>
+                            <span className="text-xs font-bold text-slate-700">{diskUsagePercent}%</span>
+                        </div>
                     </div>
                 </div>
 

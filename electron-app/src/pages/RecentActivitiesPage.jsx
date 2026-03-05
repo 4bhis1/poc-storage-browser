@@ -6,7 +6,7 @@ import {
 } from '../components/ui/table';
 import {
   CheckCircle2, XCircle, Clock,
-  Archive, Download, Upload, History
+  Download, Upload, History, RefreshCw, Activity, RotateCcw
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -15,12 +15,12 @@ export default function RecentActivitiesPage() {
     const [localActivities, setLocalActivities] = useState([]);
     const [loading, setLoading] = useState(true);
     const [search, setSearch] = useState('');
+    const [activeTransfers, setActiveTransfers] = useState([]);
+    const [retryingId, setRetryingId] = useState(null);
 
     const fetchLocalActivities = async () => {
-        setLoading(true);
         try {
             if (window.electronAPI?.getLocalSyncActivities) {
-                // Fetching all local activities regardless of configId
                 const rows = await window.electronAPI.getLocalSyncActivities(null);
                 setLocalActivities(rows || []);
             }
@@ -31,11 +31,60 @@ export default function RecentActivitiesPage() {
         }
     };
 
+    const fetchActiveTransfers = async () => {
+        try {
+            if (window.electronAPI?.getActiveTransfers) {
+                const transfers = await window.electronAPI.getActiveTransfers();
+                const active = Object.values(transfers || {}).filter(t => t.status !== 'done' && t.status !== 'error');
+                setActiveTransfers(active);
+            }
+        } catch {}
+    };
+
     useEffect(() => {
+        setLoading(true);
         fetchLocalActivities();
-        const interval = setInterval(fetchLocalActivities, 8000);
+        fetchActiveTransfers();
+        const interval = setInterval(() => {
+            fetchLocalActivities();
+            fetchActiveTransfers();
+        }, 5000);
         return () => clearInterval(interval);
     }, []);
+
+    // Real-time activity subscription
+    useEffect(() => {
+        if (!window.electronAPI?.onSyncActivityLogged) return;
+        const cleanup = window.electronAPI.onSyncActivityLogged((activity) => {
+            setLocalActivities(prev => [activity, ...prev].slice(0, 200));
+        });
+        return cleanup;
+    }, []);
+
+    // Transfer status subscription
+    useEffect(() => {
+        if (!window.electronAPI?.onTransferStatusUpdate) return;
+        const cleanup = window.electronAPI.onTransferStatusUpdate((transfers) => {
+            const active = Object.values(transfers || {}).filter(t => t.status !== 'done' && t.status !== 'error');
+            setActiveTransfers(active);
+        });
+        return cleanup;
+    }, []);
+
+    const handleRetry = async (activityId) => {
+        if (!window.electronAPI?.retryFailedSync) return;
+        setRetryingId(activityId);
+        try {
+            await window.electronAPI.retryFailedSync(activityId);
+            setTimeout(() => {
+                fetchLocalActivities();
+                setRetryingId(null);
+            }, 3000);
+        } catch (err) {
+            console.error('Retry failed', err);
+            setRetryingId(null);
+        }
+    };
 
     const formatDate = (dateString) => {
         if (!dateString) return '--';
@@ -46,12 +95,18 @@ export default function RecentActivitiesPage() {
         });
     };
 
+    function formatBytes(bytes) {
+        if (!bytes || isNaN(bytes) || bytes === 0) return '0 B';
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(1024));
+        return (bytes / Math.pow(1024, i)).toFixed(1) + ' ' + sizes[i];
+    }
+
     const getActionBadge = (action, status) => {
         let colorClasses = 'bg-blue-50 text-blue-600';
         if (status === 'FAILED') colorClasses = 'bg-rose-50 text-rose-600';
         else if (action === 'UPLOAD') colorClasses = 'bg-amber-50 text-amber-700';
         else if (action === 'DOWNLOAD') colorClasses = 'bg-emerald-50 text-emerald-700';
-        else if (action === 'SKIP') colorClasses = 'bg-slate-100 text-slate-500';
         else if (action === 'DELETE') colorClasses = 'bg-red-50 text-red-600';
         return (
             <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${colorClasses}`}>
@@ -72,6 +127,18 @@ export default function RecentActivitiesPage() {
         );
     }, [localActivities, search]);
 
+    // Compute global progress from active transfers
+    const globalProgress = useMemo(() => {
+        if (activeTransfers.length === 0) return null;
+        let totalBytes = 0;
+        let transferredBytes = 0;
+        activeTransfers.forEach(t => {
+            totalBytes += t.totalSize || 0;
+            transferredBytes += t.bytesTransferred || 0;
+        });
+        return { count: activeTransfers.length, totalBytes, transferredBytes };
+    }, [activeTransfers]);
+
     return (
         <div className="flex flex-col h-full bg-slate-50 relative">
             <div className="bg-white px-6 py-4 border-b border-slate-200 flex items-center justify-between z-10 sticky top-0">
@@ -79,9 +146,37 @@ export default function RecentActivitiesPage() {
                     <History className="h-4 w-4 text-slate-500" />
                     <span className="font-semibold text-slate-900">Recent Activities</span>
                 </nav>
+                <Button variant="outline" size="sm" className="gap-1.5" onClick={() => { setLoading(true); fetchLocalActivities(); }} disabled={loading}>
+                    <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
+                </Button>
             </div>
 
             <div className="flex-1 overflow-auto p-6 space-y-4">
+
+                {/* Global Progress Header */}
+                {globalProgress && (
+                    <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl p-4 text-white shadow-lg">
+                        <div className="flex items-center justify-between mb-2">
+                            <div className="flex items-center gap-2">
+                                <RefreshCw className="h-4 w-4 animate-spin" />
+                                <span className="font-semibold text-sm">
+                                    Syncing {globalProgress.count} file{globalProgress.count > 1 ? 's' : ''}
+                                </span>
+                            </div>
+                            <span className="text-xs font-mono opacity-80">
+                                {formatBytes(globalProgress.transferredBytes)} / {formatBytes(globalProgress.totalBytes)}
+                            </span>
+                        </div>
+                        <div className="h-2 bg-white/20 rounded-full overflow-hidden">
+                            <div 
+                                className="h-full bg-white/80 rounded-full transition-all duration-500"
+                                style={{ width: `${globalProgress.totalBytes > 0 ? Math.min(100, (globalProgress.transferredBytes / globalProgress.totalBytes) * 100) : 0}%` }}
+                            />
+                        </div>
+                    </div>
+                )}
+
+                {/* Search */}
                 <div className="relative max-w-sm">
                     <input
                         type="text"
@@ -110,6 +205,7 @@ export default function RecentActivitiesPage() {
                                     <TableHead className="hidden lg:table-cell w-40 font-semibold text-slate-600">Time</TableHead>
                                     <TableHead className="w-20 text-center font-semibold text-slate-600">Synced</TableHead>
                                     <TableHead className="hidden xl:table-cell font-semibold text-slate-600">Error</TableHead>
+                                    <TableHead className="w-20 text-center font-semibold text-slate-600">Actions</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -126,10 +222,14 @@ export default function RecentActivitiesPage() {
                                                 ) : act.status === 'FAILED' ? (
                                                     <XCircle className="h-3.5 w-3.5 text-rose-500 shrink-0" />
                                                 ) : (
-                                                    <Clock className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                                    <Clock className="h-3.5 w-3.5 text-blue-500 animate-pulse shrink-0" />
                                                 )}
-                                                <span className={`text-xs font-bold tracking-wide ${act.status === 'FAILED' ? 'text-rose-600' : act.status === 'SUCCESS' ? 'text-emerald-600' : 'text-slate-500'}`}>
-                                                    {act.status}
+                                                <span className={`text-xs font-bold tracking-wide ${
+                                                    act.status === 'FAILED' ? 'text-rose-600' 
+                                                    : act.status === 'SUCCESS' ? 'text-emerald-600' 
+                                                    : 'text-blue-600'
+                                                }`}>
+                                                    {act.status === 'IN_PROGRESS' ? 'In Progress' : act.status}
                                                 </span>
                                             </div>
                                         </TableCell>
@@ -146,14 +246,34 @@ export default function RecentActivitiesPage() {
                                         <TableCell className="hidden xl:table-cell text-xs text-rose-500 max-w-[200px] truncate" title={act.error || ''}>
                                             {act.error || ''}
                                         </TableCell>
+                                        <TableCell className="text-center">
+                                            {act.status === 'FAILED' && (
+                                                <Button
+                                                    variant="ghost"
+                                                    size="sm"
+                                                    className="h-7 text-xs gap-1 text-blue-600 hover:text-blue-800 hover:bg-blue-50"
+                                                    onClick={() => handleRetry(act.id)}
+                                                    disabled={retryingId === act.id}
+                                                >
+                                                    <RotateCcw className={`h-3 w-3 ${retryingId === act.id ? 'animate-spin' : ''}`} />
+                                                    {retryingId === act.id ? '...' : 'Retry'}
+                                                </Button>
+                                            )}
+                                        </TableCell>
                                     </TableRow>
                                 ))}
                             </TableBody>
                         </Table>
                     </div>
                 ) : !loading && (
-                    <div className="text-center py-20 text-slate-500">
-                        {search ? 'No activities match your search' : 'No recent sync activities found.'}
+                    <div className="flex flex-col items-center justify-center py-20 text-center">
+                        <Activity className="h-10 w-10 text-slate-300 mb-3" />
+                        <p className="text-sm font-medium text-slate-600">
+                            {search ? 'No activities match your search' : 'Your sync history will appear here.'}
+                        </p>
+                        <p className="text-xs text-slate-400 mt-1">
+                            {search ? '' : 'Start a sync to see upload and download events.'}
+                        </p>
                     </div>
                 )}
             </div>

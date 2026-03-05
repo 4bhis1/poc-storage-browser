@@ -1,6 +1,8 @@
 const { ipcMain, dialog, shell } = require('electron');
 const path = require('path');
 const backend = require('../backend');
+const cognito = require('../backend/cognito');
+const authManager = require('../backend/auth');
 
 function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
     // 1. Local File Handling
@@ -85,6 +87,38 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
         return true;
     });
 
+    // Awaitable initial bucket sync — called after login to populate local DB before UI needs it
+    ipcMain.handle('sync-buckets-now', async () => {
+        try {
+            await backend.sync.syncAll();
+            const bucketCount = await backend.db.query('SELECT COUNT(*) as count FROM "Bucket"');
+            const count = parseInt(bucketCount.rows[0]?.count || 0);
+            console.log(`[IPC] sync-buckets-now completed: ${count} buckets in local DB`);
+            return { success: true, bucketCount: count };
+        } catch (err) {
+            console.error('[IPC] sync-buckets-now error:', err.message);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('sync-config-now', async (event, configId) => {
+        try {
+            // Check if already syncing
+            const check = await backend.db.query('SELECT "isSyncing" FROM "SyncConfig" WHERE id = $1', [configId]);
+            if (check.rows[0]?.isSyncing) {
+                return { success: false, error: 'Sync is already in progress for this config' };
+            }
+            // Reset lastSync to null so the config is picked up immediately
+            await backend.db.query('UPDATE "SyncConfig" SET "lastSync" = NULL WHERE id = $1', [configId]);
+            // Run the sync cycle which will pick up this config
+            backend.sync.runSync();
+            return { success: true };
+        } catch (err) {
+            console.error('[IPC] sync-config-now error:', err.message);
+            return { success: false, error: err.message };
+        }
+    });
+
     // 6. Full-text search across all local FileObjects
     ipcMain.handle('search-files', async (event, { query }) => {
         if (!query || query.trim().length < 1) return [];
@@ -122,6 +156,22 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
             return [];
         }
     });
+
+    ipcMain.handle('retry-failed-sync', async (event, syncActivityId) => {
+        try {
+            const query = await backend.db.query('SELECT "configId" FROM "LocalSyncActivity" WHERE id = $1', [syncActivityId]);
+            if (query.rows.length > 0 && query.rows[0].configId) {
+                if (backend.sync.reloadConfigs) {
+                    backend.sync.reloadConfigs();
+                }
+                return { success: true };
+            }
+            return { success: false, error: 'Config not found for this activity' };
+        } catch (err) {
+            console.error('[IPC] retry-failed-sync error:', err.message);
+            return { success: false, error: err.message };
+        }
+    });
     
     ipcMain.handle('get-sync-jobs', async (event, configId) => {
         try {
@@ -152,12 +202,15 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
         }
     });
 
-    ipcMain.handle('create-sync-config', async (event, { name, intervalMinutes, mappings }) => {
+    ipcMain.handle('create-sync-config', async (event, { name, intervalMinutes, mappings, direction, useWatcher }) => {
         try {
             const id = 'cfg-' + Date.now();
+            const dir = direction || 'DOWNLOAD';
+            const watcher = dir === 'UPLOAD' ? (useWatcher !== false) : false;
+            
             await backend.db.query(
-                `INSERT INTO "SyncConfig" (id, name, "intervalMinutes") VALUES ($1, $2, $3)`,
-                [id, name, intervalMinutes]
+                `INSERT INTO "SyncConfig" (id, name, "intervalMinutes", "direction", "useWatcher") VALUES ($1, $2, $3, $4, $5)`,
+                [id, name, intervalMinutes, dir, watcher]
             );
             
             for (const map of mappings) {
@@ -167,9 +220,9 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
                     [mapId, id, map.localPath, map.bucketId]
                 );
                 
-                // Add to active watcher
-                if (backend.sync.addWatcherPath) {
-                   backend.sync.addWatcherPath(map.localPath);
+                // Only add to watcher for UPLOAD configs with watcher enabled
+                if (dir === 'UPLOAD' && watcher && backend.sync.addWatcherPath) {
+                   backend.sync.addWatcherPath(map.localPath, true);
                 }
             }
             
@@ -203,6 +256,73 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
         });
         return canceled ? null : filePaths[0];
     });
+
+    // ── 9. Cognito Auth handlers ────────────────────────────────────────────
+
+    ipcMain.handle('auth:login', async (event, { email, password }) => {
+        try {
+            const result = await cognito.authenticateCognitoUser(email, password);
+            if (result.challengeName === 'NEW_PASSWORD_REQUIRED') {
+                return { success: true, challengeName: result.challengeName, session: result.session, username: result.username };
+            }
+            authManager.login(result);
+            return { success: true, accessToken: result.accessToken, idToken: result.idToken };
+        } catch (err) {
+            console.error('[IPC] auth:login error:', err.message);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('auth:new-password', async (event, { username, newPassword, session }) => {
+        try {
+            const result = await cognito.respondToNewPasswordChallenge(username, newPassword, session);
+            authManager.login(result);
+            return { success: true, accessToken: result.accessToken, idToken: result.idToken };
+        } catch (err) {
+            console.error('[IPC] auth:new-password error:', err.message);
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('auth:refresh', async () => {
+        try {
+            return await authManager.refreshTokens();
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('auth:logout', () => {
+        authManager.logout();
+        return { success: true };
+    });
+
+    ipcMain.handle('auth:get-session', () => {
+        return authManager.getSession();
+    });
+
+    ipcMain.handle('auth:forgot-password', async (event, { email }) => {
+        try {
+            return await cognito.forgotPassword(email);
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('auth:confirm-password', async (event, { email, code, newPassword }) => {
+        try {
+            return await cognito.confirmForgotPassword(email, code, newPassword);
+        } catch (err) {
+            return { success: false, error: err.message };
+        }
+    });
+
+    ipcMain.handle('auth:open-browser-sso', async () => {
+        const enterpriseUrl = process.env.ENTERPRISE_URL || 'http://localhost:3000';
+        await shell.openExternal(`${enterpriseUrl}/api/auth/agent-sso`);
+        return { success: true };
+    });
 }
 
 module.exports = { registerIpcHandlers };
+

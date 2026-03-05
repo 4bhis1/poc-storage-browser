@@ -51,10 +51,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   initSync: (token) => ipcRenderer.invoke('init-sync', token),
   stopSync: () => ipcRenderer.invoke('stop-sync'),
   forceSync: () => ipcRenderer.invoke('force-sync'),
+  syncBucketsNow: () => ipcRenderer.invoke('sync-buckets-now'),
+  syncConfigNow: (configId) => ipcRenderer.invoke('sync-config-now', configId),
+  retryFailedSync: (syncActivityId) => ipcRenderer.invoke('retry-failed-sync', syncActivityId),
   onAuthExpired: (callback) => {
     const sub = () => callback();
     ipcRenderer.on('auth-expired', sub);
     return () => ipcRenderer.removeListener('auth-expired', sub);
+  },
+  onSyncActivityLogged: (callback) => {
+    const sub = (_, val) => callback(val);
+    ipcRenderer.on('sync-activity-logged', sub);
+    return () => ipcRenderer.removeListener('sync-activity-logged', sub);
   },
 
   // 6. DB Helpers
@@ -72,5 +80,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const sub = (_, val) => callback(val);
     ipcRenderer.on(`file-${event}`, sub);
     return () => ipcRenderer.removeListener(`file-${event}`, sub);
+  },
+
+  // 8. Auth (Cognito IPC)
+  auth: {
+    login:           (email, password)               => ipcRenderer.invoke('auth:login', { email, password }),
+    newPassword:     (username, newPassword, session) => ipcRenderer.invoke('auth:new-password', { username, newPassword, session }),
+    refresh:         ()                               => ipcRenderer.invoke('auth:refresh'),
+    logout:          ()                               => ipcRenderer.invoke('auth:logout'),
+    getSession:      ()                               => ipcRenderer.invoke('auth:get-session'),
+    forgotPassword:  (email)                          => ipcRenderer.invoke('auth:forgot-password', { email }),
+    confirmPassword: (email, code, newPassword)       => ipcRenderer.invoke('auth:confirm-password', { email, code, newPassword }),
+    openBrowserSSO:  ()                               => ipcRenderer.invoke('auth:open-browser-sso'),
+    onSSOResult: (cb) => {
+      const sub = (_, data) => cb(data);
+      ipcRenderer.on('sso-auth-result', sub);
+      return () => ipcRenderer.removeListener('sso-auth-result', sub);
+    },
   }
 });
