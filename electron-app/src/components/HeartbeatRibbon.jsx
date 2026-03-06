@@ -7,6 +7,10 @@ import { Activity, Wifi, WifiOff } from 'lucide-react';
  * Color coding: green (< 200ms), yellow (200-500ms), red (failed), gray (no data)
  */
 export default function HeartbeatRibbon({ logs, currentStatus }) {
+  // SQLite datetime('now') stores UTC without a 'Z' suffix — append it so
+  // JS Date parses it as UTC instead of local time.
+  const parseUTC = (ts) => new Date(ts?.endsWith('Z') ? ts : ts + 'Z').getTime();
+
   // Group logs into 1-minute buckets (60 total)
   const now = Date.now();
   const buckets = Array.from({ length: 60 }, (_, i) => {
@@ -14,7 +18,7 @@ export default function HeartbeatRibbon({ logs, currentStatus }) {
     const bucketEnd = bucketStart + 60 * 1000;
     
     const logsInBucket = logs.filter(log => {
-      const logTime = new Date(log.timestamp).getTime();
+      const logTime = parseUTC(log.timestamp);
       return logTime >= bucketStart && logTime < bucketEnd;
     });
 
@@ -37,7 +41,7 @@ export default function HeartbeatRibbon({ logs, currentStatus }) {
     : 0;
 
   const last24h = logs.filter(l => {
-    const logTime = new Date(l.timestamp).getTime();
+    const logTime = parseUTC(l.timestamp);
     return logTime > now - 24 * 60 * 60 * 1000;
   });
   const uptime24h = last24h.length > 0
@@ -56,7 +60,7 @@ export default function HeartbeatRibbon({ logs, currentStatus }) {
 
   function formatTime(timestamp) {
     if (!timestamp) return 'Never';
-    const date = new Date(timestamp);
+    const date = new Date(timestamp?.endsWith?.('Z') ? timestamp : timestamp + 'Z');
     const diff = Math.floor((Date.now() - date.getTime()) / 1000);
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;

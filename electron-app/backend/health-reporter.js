@@ -23,7 +23,7 @@ class HealthReporter {
     this._timer = setInterval(() => this._report(), REPORT_INTERVAL);
     if (this._timer.unref) this._timer.unref();
     console.log('[HealthReporter] Started (interval=5min)');
-    // First report after 10s to let heartbeat fire first
+    // First report after 5s to let heartbeat fire first
     setTimeout(() => this._report(), 10000);
   }
 
@@ -34,15 +34,26 @@ class HealthReporter {
     }
   }
 
+  // Manual trigger for testing
+  async triggerReport() {
+    console.log('[HealthReporter] Manual trigger requested');
+    await this._report();
+  }
+
   async _report() {
     const session = authManager.getSession();
-    if (!session?.idToken) return;
+    if (!session?.idToken) {
+      console.log('[HealthReporter] No session, skipping report');
+      return;
+    }
 
     try {
       const [heartbeatLogs, diagnostics] = await Promise.all([
         heartbeat.getHeartbeatHistory(60),
         doctor.getLastDiagnostics(),
       ]);
+
+      console.log(`[HealthReporter] Fetched ${heartbeatLogs.length} heartbeat logs, ${diagnostics.length} diagnostics`);
 
       let currentStatus = 'UNKNOWN';
       if (heartbeatLogs.length > 0) {
@@ -51,15 +62,23 @@ class HealthReporter {
         currentStatus = isRecent && latest.status === 'SUCCESS' ? 'ACTIVE' : 'OFFLINE';
       }
 
-      await axios.post(
+      const payload = { heartbeatLogs, diagnostics, currentStatus };
+      console.log(`[HealthReporter] Sending payload:`, JSON.stringify(payload, null, 2));
+
+      const response = await axios.post(
         `${API_URL}/api/agent/health`,
-        { heartbeatLogs, diagnostics, currentStatus },
+        payload,
         { headers: { Authorization: `Bearer ${session.idToken}` }, timeout: 15000 }
       );
 
-      console.log(`[HealthReporter] Pushed health data (status=${currentStatus}, beats=${heartbeatLogs.length}, diags=${diagnostics.length})`);
+      console.log(`[HealthReporter] ✓ Pushed health data (status=${currentStatus}, beats=${heartbeatLogs.length}, diags=${diagnostics.length})`);
+      console.log(`[HealthReporter] Server response:`, response.data);
     } catch (err) {
       console.error('[HealthReporter] Failed:', err.message);
+      if (err.response) {
+        console.error('[HealthReporter] Response status:', err.response.status);
+        console.error('[HealthReporter] Response data:', err.response.data);
+      }
     }
   }
 }
