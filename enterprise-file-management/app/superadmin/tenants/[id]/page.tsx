@@ -12,6 +12,7 @@ import { formatBytes } from "@/lib/mock-data"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { AddUserDialog } from "@/components/tenants/add-user-dialog"
 import { UserActionsMenu } from "@/components/tenants/user-actions-menu"
+import { TenantAwsAccountTab } from "@/components/tenants/tenant-aws-account-tab"
 
 export default async function TenantDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -56,6 +57,9 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
           friendlyName: true,
           status: true,
           createdAt: true,
+          lastValidatedAt: true,
+          id: true,
+          roleArn: true,
         }
       },
       teams: {
@@ -81,7 +85,9 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
   })
   const totalStorageUsed = Number(storageResult._sum.size || 0)
 
-  const activeAwsAccount = tenant.awsAccounts.find(a => ["CONNECTED", "CREATING", "PENDING_VALIDATION"].includes(a.status))
+  const activeAwsAccount = tenant.awsAccounts.find(a => 
+    ["CONNECTED", "CREATING", "PENDING_VALIDATION", "FAILED", "DISCONNECTED"].includes(a.status)
+  )
 
   return (
     <div className="flex-1 overflow-auto p-6 max-w-7xl mx-auto w-full">
@@ -119,6 +125,9 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
           </TabsTrigger>
           <TabsTrigger value="teams">
             Teams <Badge variant="secondary" className="ml-2 bg-background/50">{tenant.teams.length}</Badge>
+          </TabsTrigger>
+          <TabsTrigger value="aws-account">
+            AWS Account
           </TabsTrigger>
         </TabsList>
 
@@ -209,8 +218,12 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
                           <p className="text-sm text-muted-foreground font-mono">{activeAwsAccount.awsAccountId}</p>
                         </div>
                       </div>
-                      <Badge variant={activeAwsAccount.status === "CONNECTED" ? "default" : "secondary"}>
-                        {activeAwsAccount.status}
+                      <Badge variant={
+                        activeAwsAccount.status === "CONNECTED" ? "default" :
+                        activeAwsAccount.status === "FAILED" || activeAwsAccount.status === "DISCONNECTED" ? "destructive" :
+                        "secondary"
+                      }>
+                        {activeAwsAccount.status.replace("_", " ")}
                       </Badge>
                     </div>
                     <div className="grid grid-cols-2 gap-4 text-sm mt-4 p-4 bg-muted/50 rounded-lg">
@@ -227,7 +240,7 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
                 ) : (
                   <div className="flex flex-col items-center justify-center p-6 text-center border-2 border-dashed rounded-lg bg-muted/20">
                     <Cloud className="h-8 w-8 mb-2 text-muted-foreground/50" />
-                    <h3 className="text-sm font-medium mb-1">No Connected AWS Account</h3>
+                    <h3 className="text-sm font-medium mb-1">No AWS Account Integrated</h3>
                     <p className="text-xs text-muted-foreground mb-4">This tenant relies on the central hub architecture.</p>
                     <Button variant="outline" size="sm" asChild>
                       <Link href={`/superadmin/aws-accounts/link?tenantId=${tenant.id}`}>
@@ -340,6 +353,18 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
               </Table>
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="aws-account">
+          <TenantAwsAccountTab
+            tenantId={tenant.id}
+            tenantName={tenant.name}
+            isHubTenant={tenant.isHubTenant}
+            awsAccounts={tenant.awsAccounts.map(a => ({
+              ...a,
+              createdAt: a.createdAt.toISOString(),
+            }))}
+          />
         </TabsContent>
 
         <TabsContent value="teams">

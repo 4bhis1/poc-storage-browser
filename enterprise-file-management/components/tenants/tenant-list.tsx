@@ -96,7 +96,6 @@ export function TenantList({ initialTenants, showAwsLink = false }: TenantListPr
                                 <TableHead>Users</TableHead>
                                 <TableHead>Storage Used</TableHead>
                                 <TableHead className="text-right">Created</TableHead>
-                                {showAwsLink && <TableHead className="text-right">Actions</TableHead>}
                             </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -131,32 +130,6 @@ export function TenantList({ initialTenants, showAwsLink = false }: TenantListPr
                                         <TableCell className="text-right">
                                             {new Date(tenant.createdAt).toLocaleDateString()}
                                         </TableCell>
-                                        {showAwsLink && (
-                                            <TableCell className="text-right">
-                                                {!tenant.isHubTenant && (!tenant.awsAccounts || tenant.awsAccounts.length === 0) && (
-                                                    <Button variant="outline" size="sm" asChild>
-                                                        <Link href={`/superadmin/aws-accounts/link?tenantId=${tenant.id}`}>
-                                                            <LinkIcon className="mr-2 h-4 w-4" />
-                                                            Link AWS Account
-                                                        </Link>
-                                                    </Button>
-                                                )}
-                                                {!tenant.isHubTenant && tenant.awsAccounts && tenant.awsAccounts.length > 0 && (
-                                                    <div className="flex justify-end gap-2">
-                                                        <Button variant="outline" size="sm" asChild>
-                                                            <Link href={`/superadmin/aws-accounts?tenantId=${tenant.id}`}>
-                                                                <LinkIcon className="mr-2 h-4 w-4" />
-                                                                View Connection
-                                                            </Link>
-                                                        </Button>
-                                                        <Button variant="outline" size="sm" onClick={() => setTenantToReplace(tenant)}>
-                                                            <AlertTriangle className="mr-2 h-4 w-4 text-amber-500" />
-                                                            Replace
-                                                        </Button>
-                                                    </div>
-                                                )}
-                                            </TableCell>
-                                        )}
                                     </TableRow>
                                 ))
                             )}
