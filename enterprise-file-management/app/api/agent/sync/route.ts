@@ -3,9 +3,13 @@
  *
  * PRIVATE endpoint for the local Electron desktop agent.
  * Returns:
- *   - tenants, accounts (with ACTUAL encrypted credentials, not redacted)
+ *   - tenants, accounts (NO raw credentials — agent uses /api/agent/credentials for STS)
  *   - buckets with all their file objects (key, size, isFolder, etc.)
  *     so the agent can diff vs local filesystem and download missing files.
+ *
+ * Query params:
+ *   - updatedSince (optional ISO timestamp): only return files updated after this time.
+ *     First sync omits this param for a full sync; subsequent syncs pass the last sync time.
  *
  * Security: JWT required. ADMIN roles only.
  */
@@ -24,6 +28,10 @@ export async function GET(request: NextRequest) {
     try {
         const token = request.headers.get('Authorization')?.split(' ')[1];
         if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+
+        // Optional incremental sync: only return files updated after this timestamp
+        const updatedSinceParam = request.nextUrl.searchParams.get('updatedSince');
+        const updatedSince = updatedSinceParam ? new Date(updatedSinceParam) : null;
 
         // Try bot token (HS256) first
         let userEmail: string | null = null;
@@ -93,14 +101,19 @@ export async function GET(request: NextRequest) {
                 }
             });
 
-            // For each bucket, fetch all file objects (flat list with key for path reconstruction)
+            // For each bucket, fetch file objects — incremental if updatedSince provided
             const bucketsWithFiles = await Promise.all(buckets.map(async (bucket) => {
+                const fileWhere: any = {
+                    bucketId: bucket.id,
+                    ...(updatedSince ? { updatedAt: { gt: updatedSince } } : {}),
+                };
+
                 const files = await prisma.fileObject.findMany({
-                    where: { bucketId: bucket.id },
+                    where: fileWhere,
                     select: {
                         id: true,
                         name: true,
-                        key: true,         // S3 key — used to build local path and generate presigned URL
+                        key: true,
                         isFolder: true,
                         size: true,
                         mimeType: true,
@@ -108,7 +121,7 @@ export async function GET(request: NextRequest) {
                         createdAt: true,
                         parentId: true,
                     },
-                    orderBy: { key: 'asc' }, // Sorted so folders come before their children
+                    orderBy: { key: 'asc' },
                 });
 
                 return {
@@ -127,14 +140,13 @@ export async function GET(request: NextRequest) {
                 isActive: acc.isActive,
                 updatedAt: acc.updatedAt,
                 createdAt: acc.createdAt,
-                // ACTUAL encrypted credentials (not redacted) — agent decrypts with shared ENCRYPTION_KEY
-                awsAccessKeyId: acc.awsAccessKeyId,
-                awsSecretAccessKey: acc.awsSecretAccessKey,
+                // NOTE: Raw IAM credentials intentionally omitted.
+                // Agent uses POST /api/agent/credentials for short-lived STS tokens.
                 buckets: bucketsWithFiles,
             };
         }));
 
-        return NextResponse.json({ tenants, accounts: accountsWithData });
+        return NextResponse.json({ tenants, accounts: accountsWithData, syncedAt: new Date().toISOString() });
 
     } catch (error) {
         console.error('[AgentSync] Error:', error);

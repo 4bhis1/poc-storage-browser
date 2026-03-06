@@ -334,6 +334,16 @@ const initDB = () => {
       );
     `);
 
+    // ── KVStore — generic key/value store for agent state ────────────────────
+    // Used for: lastFullSyncAt (incremental sync cursor), etc.
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS "KVStore" (
+        "key" TEXT PRIMARY KEY,
+        "value" TEXT NOT NULL,
+        "updatedAt" TEXT DEFAULT (datetime('now'))
+      );
+    `);
+
     conn.exec('COMMIT;');
     console.log('[Database] SQLite initialized successfully');
   } catch (e) {

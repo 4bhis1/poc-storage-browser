@@ -3,8 +3,6 @@ const axios = require('axios');
 const fs = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
-const https = require('https');
-const http = require('http');
 const crypto = require('crypto');
 const syncHistory = require('./syncHistory');
 
@@ -91,11 +89,18 @@ class SyncManager {
     // ─────────────────────────────────────────────────────────────────────────
 
     async syncAll() {
-        const response = await axios.get(`${API_URL}/agent/sync`, {
+        // Build incremental sync param — pass lastSyncedAt if we have one
+        const lastSyncRow = await database.query(
+            `SELECT value FROM "KVStore" WHERE key = 'lastFullSyncAt' LIMIT 1`
+        ).catch(() => ({ rows: [] }));
+        const lastSyncAt = lastSyncRow.rows[0]?.value || null;
+
+        const params = lastSyncAt ? `?updatedSince=${encodeURIComponent(lastSyncAt)}` : '';
+        const response = await axios.get(`${API_URL}/agent/sync${params}`, {
             headers: { Authorization: `Bearer ${this.authToken}` }
         });
 
-        const { tenants, accounts } = response.data;
+        const { tenants, accounts, syncedAt } = response.data;
 
         // 1. Sync Tenants into local DB
         for (const tenant of (tenants || [])) {
@@ -108,34 +113,52 @@ class SyncManager {
             `, [tenant.id, tenant.name, tenant.updatedAt || new Date().toISOString()]);
         }
 
-        // 2. Sync Accounts (with real encrypted credentials)
+        // 2. Sync Accounts — NO raw IAM credentials stored locally.
+        //    Agent uses /api/agent/credentials for short-lived STS tokens.
         for (const account of (accounts || [])) {
             await database.query(`
-                INSERT INTO "Account" (id, name, "awsAccessKeyId", "awsSecretAccessKey", "tenantId", "updatedAt")
-                VALUES ($1, $2, $3, $4, $5, $6)
+                INSERT INTO "Account" (id, name, "tenantId", "updatedAt")
+                VALUES ($1, $2, $3, $4)
                 ON CONFLICT (id) DO UPDATE SET
                     name = EXCLUDED.name,
-                    "awsAccessKeyId" = EXCLUDED."awsAccessKeyId",
-                    "awsSecretAccessKey" = EXCLUDED."awsSecretAccessKey",
                     "updatedAt" = EXCLUDED."updatedAt"
             `, [
                 account.id, account.name,
-                account.awsAccessKeyId,
-                account.awsSecretAccessKey,
                 account.tenantId,
                 account.updatedAt || new Date().toISOString()
             ]);
 
-            console.log(`[SyncManager] Account synced: ${account.name} (creds: ${account.awsAccessKeyId ? 'OK' : 'MISSING'})`);
+            console.log(`[SyncManager] Account synced: ${account.name}`);
 
             // 3. For each bucket — upsert metadata to local DB
             for (const bucket of (account.buckets || [])) {
                 await this.upsertBucketMetadata(bucket);
             }
         }
+
+        // 4. Persist the server-returned syncedAt for next incremental sync
+        if (syncedAt) {
+            await database.query(`
+                INSERT INTO "KVStore" (key, value) VALUES ('lastFullSyncAt', $1)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            `, [syncedAt]).catch(() => {
+                // KVStore table may not exist on older installs — non-fatal
+                console.warn('[SyncManager] Could not persist lastFullSyncAt — KVStore table missing?');
+            });
+        }
     }
 
     async syncConfigs() {
+        // Auto-release stale locks: if isSyncing=1 but lastSync is >30 min ago,
+        // the app likely crashed mid-sync. Force-release to unblock.
+        await database.query(`
+            UPDATE "SyncConfig"
+            SET "isSyncing" = 0
+            WHERE "isSyncing" = 1
+              AND "lastSync" IS NOT NULL
+              AND "lastSync" < datetime('now', '-30 minutes')
+        `);
+
         // Read configs that need sync (respecting interval)
         const configs = await database.query(`
             SELECT * FROM "SyncConfig" 
@@ -144,8 +167,7 @@ class SyncManager {
         `);
 
         for (const config of configs.rows) {
-            // Per-config lock: set isSyncing = true
-            // SQLite: no RETURNING — use a SELECT after UPDATE to confirm lock
+            // Per-config lock — double-check it's still unlocked before acquiring
             const preCheck = await database.query(
                 `SELECT id FROM "SyncConfig" WHERE id = $1 AND "isSyncing" = 0`,
                 [config.id]
@@ -158,8 +180,6 @@ class SyncManager {
                 `UPDATE "SyncConfig" SET "isSyncing" = 1 WHERE id = $1 AND "isSyncing" = 0`,
                 [config.id]
             );
-            const lockResult = preCheck;
-            // Lock check already handled above
 
             const direction = config.direction || 'DOWNLOAD';
             console.log(`[SyncManager] Running scheduled sync config: ${config.name} (direction: ${direction})`);
@@ -430,6 +450,8 @@ class SyncManager {
 
     // ─────────────────────────────────────────────────────────────────────────
     // DOWNLOAD A SINGLE FILE (with watcher guard to prevent re-upload loop)
+    // Uses DownloadManager.downloadWithBucketId() which fetches short-lived
+    // STS credentials via /api/agent/credentials — same cross-account flow as uploads.
     // ─────────────────────────────────────────────────────────────────────────
 
     async downloadFile(bucket, file, localFilePath) {
@@ -442,92 +464,50 @@ class SyncManager {
         // Register in watcher guard BEFORE writing so the watcher skips re-uploading
         this.downloadingPaths.add(localFilePath);
 
-        const statusManager = require('./transfers/status');
-        const transferId = `dl-${Date.now()}-${file.name}`;
-        statusManager.startTransfer(transferId, file.name, 'download', file.size || 0);
-
         try {
-            console.log(`[SyncManager] Downloading: ${file.key} → ${path.basename(localFilePath)}`);
+            console.log(`[SyncManager] Downloading via STS: ${file.key} → ${path.basename(localFilePath)}`);
 
-            // Get presigned download URL from Global DB web app
-            const presignRes = await axios.get(`${API_URL}/files/presigned`, {
-                params: {
-                    bucketId: bucket.id,
-                    name: file.key,
-                    action: 'download',
-                    contentType: file.mimeType || 'application/octet-stream',
-                },
-                headers: { Authorization: `Bearer ${this.authToken}` }
-            });
+            // Use DownloadManager which fetches cross-account STS credentials
+            const downloadManager = require('./transfers/download');
+            await downloadManager.downloadWithBucketId(bucket.id, file.key, localFilePath, file.size || 0);
 
-            const { url } = presignRes.data;
-            if (!url) throw new Error(`No presigned URL returned for key: ${file.key}`);
-
-            // Stream to disk with progress updates
-            await this.streamToFileWithProgress(url, localFilePath, file.size || 0, (bytesWritten) => {
-                if (file.size > 0) {
-                    statusManager.updateProgress(transferId, (bytesWritten / file.size) * 100, bytesWritten);
-                }
-            });
-
-            // Calculate local ETag after download
+            // Calculate local ETag after download for future sync comparisons
             try {
                 const downloadedHash = await this._computeFileHash(localFilePath);
-                await database.query('UPDATE "FileObject" SET "localEtag" = $1 WHERE key = $2 AND "bucketId" = $3', [downloadedHash, file.key, bucket.id]);
+                await database.query(
+                    'UPDATE "FileObject" SET "localEtag" = $1 WHERE key = $2 AND "bucketId" = $3',
+                    [downloadedHash, file.key, bucket.id]
+                );
             } catch(e) {
                 console.error(`[SyncManager] Failed to compute ETag for ${file.key}:`, e.message);
             }
 
-            statusManager.completeTransfer(transferId, 'done');
             console.log(`[SyncManager] Downloaded: ${file.key}`);
 
         } catch (err) {
-            const statusManager2 = require('./transfers/status');
-            statusManager2.completeTransfer(transferId, 'error');
             throw err;
         } finally {
-            // Remove from watcher guard after stability threshold
+            // Remove from watcher guard after chokidar's awaitWriteFinish stability window
             setTimeout(() => {
                 this.downloadingPaths.delete(localFilePath);
             }, 3000);
         }
     }
 
-    // Stream HTTP/HTTPS URL to a file, calling onProgress(bytesWritten) periodically
-    streamToFileWithProgress(url, destPath, totalSize, onProgress) {
-        return new Promise((resolve, reject) => {
-            const proto = url.startsWith('https') ? https : http;
-            const file = fs.createWriteStream(destPath);
-            let bytesWritten = 0;
-
-            proto.get(url, (response) => {
-                if (response.statusCode !== 200) {
-                    file.close();
-                    fs.unlink(destPath, () => {});
-                    return reject(new Error(`HTTP ${response.statusCode} downloading ${path.basename(destPath)}`));
-                }
-
-                response.on('data', (chunk) => {
-                    bytesWritten += chunk.length;
-                    if (onProgress) onProgress(bytesWritten);
-                });
-
-                response.pipe(file);
-                file.on('finish', () => file.close(resolve));
-                file.on('error', (err) => {
-                    file.close();
-                    fs.unlink(destPath, () => {});
-                    reject(err);
-                });
-            }).on('error', (err) => {
-                file.close();
-                fs.unlink(destPath, () => {});
-                reject(err);
-            });
-        });
-    }
 
     _computeFileHash(filePath) {
+        return new Promise((resolve, reject) => {
+            const hash = crypto.createHash('md5');
+            const stream = fs.createReadStream(filePath);
+            stream.on('data', data => hash.update(data));
+            stream.on('end', () => resolve(hash.digest('hex')));
+            stream.on('error', reject);
+        });
+    }
+}
+
+module.exports = new SyncManager();
+
         return new Promise((resolve, reject) => {
             const hash = crypto.createHash('md5');
             const stream = fs.createReadStream(filePath);
