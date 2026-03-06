@@ -499,6 +499,48 @@ export async function POST(request: NextRequest) {
       details: { bucketName: finalBucketName, region, isExisting },
     });
 
+    // ── Step 3: Configure EventBridge for BYOA cross-account buckets ───────
+    // Same-account buckets get S3 → SQS direct notification (configured separately per bucket).
+    // BYOA buckets need EventBridge set up in the tenant's account.
+    if (awsAccount) {
+      try {
+        const { setupBucketEventBridge } = await import(
+          "@/lib/aws/setup-bucket-events"
+        );
+        const ourEventBusArn = process.env.FILE_SYNC_EVENT_BUS_ARN;
+        if (!ourEventBusArn) {
+          console.warn(
+            "FILE_SYNC_EVENT_BUS_ARN not set — skipping EventBridge setup for BYOA bucket"
+          );
+        } else {
+          const { decrypt } = await import("@/lib/encryption");
+          const result = await setupBucketEventBridge(
+            {
+              roleArn: awsAccount.roleArn,
+              externalId: awsAccount.externalId,
+              awsAccountId: awsAccount.awsAccountId,
+              region: region,
+            },
+            finalBucketName,
+            ourEventBusArn
+          );
+
+          // Persist the rule ARN for cleanup on deregistration
+          await prisma.bucket.update({
+            where: { id: bucket.id },
+            data: { eventBridgeRuleArn: result.eventBridgeRuleArn },
+          });
+        }
+      } catch (ebError) {
+        // Non-fatal: bucket is created, but event-driven DB sync won't work for this bucket.
+        // Log and surface as a warning — operator can re-trigger setup manually.
+        console.error(
+          "EventBridge setup failed for BYOA bucket — file DB sync will not be automatic:",
+          ebError
+        );
+      }
+    }
+
     return NextResponse.json(
       {
         ...bucket,

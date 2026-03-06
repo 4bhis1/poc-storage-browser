@@ -64,8 +64,9 @@ model Bucket {
   versioning    Boolean      @default(false)
   encryption    Boolean      @default(false)
   tags          String[]
-  quotaBytes    BigInt       @default(107374182400) // 100GB
-  shares        Share[]
+  quotaBytes             BigInt       @default(107374182400) // 100GB
+  eventBridgeRuleArn     String?      // EventBridge rule ARN for BYOA cross-account event routing
+  shares                 Share[]
 }
 
 model FileObject {
@@ -156,7 +157,7 @@ model ResourcePolicy {
 
 model AuditLog {
   id            String   @id @default(cuid())
-  userId        String
+  userId        String?
   action        String
   resource      String
   details       String?
@@ -168,7 +169,7 @@ model AuditLog {
   updatedBy     String?
   createdByUser User?    @relation("AuditLogCreatedBy", fields: [createdBy], references: [id])
   updatedByUser User?    @relation("AuditLogUpdatedBy", fields: [updatedBy], references: [id])
-  user          User     @relation(fields: [userId], references: [id])
+  user          User?    @relation(fields: [userId], references: [id])
 
   @@index([action])
   @@index([createdAt])

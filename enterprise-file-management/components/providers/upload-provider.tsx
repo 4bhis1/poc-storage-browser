@@ -115,24 +115,8 @@ export function UploadProvider({ children }: { children: React.ReactNode }) {
 
         if (!uploadRes.ok) throw new Error('Failed to upload to S3')
 
-        // 3. Create DB Record
-        const dbRes = await fetchWithAuth('/api/files', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                name: fileItem.name,
-                size: fileItem.size,
-                mimeType: fileItem.file.type || 'application/octet-stream',
-                bucketId: fileItem.bucketId,
-                parentId: fileItem.parentId,
-                isFolder: false,
-                key: key
-            })
-        })
-
-        if (!dbRes.ok) throw new Error('Failed to create file record')
+        // DB record is now created asynchronously by the file-sync Lambda
+        // via S3 ObjectCreated event → SQS → Lambda pipeline.
     }
 
     const uploadMultipart = async (fileItem: UploadFile) => {

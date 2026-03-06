@@ -95,57 +95,18 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Create or Update Database Record
-    const existingFile = await prisma.fileObject.findFirst({
-      where: {
-        bucketId: bucketId,
-        key: key,
-        isFolder: false,
-      },
-    });
-
-    let fileRecord;
-    if (existingFile) {
-      fileRecord = await prisma.fileObject.update({
-        where: { id: existingFile.id },
-        data: {
-          size: Number(size),
-          mimeType,
-          updatedAt: new Date(),
-          updatedBy: user.id,
-        },
-      });
-    } else {
-      fileRecord = await prisma.fileObject.create({
-        data: {
-          name,
-          key,
-          size: Number(size),
-          mimeType,
-          bucketId,
-          tenantId: bucket.tenantId,
-          parentId: parentId || null,
-          isFolder: false,
-          createdBy: user.id,
-          updatedBy: user.id,
-        },
-      });
-    }
-
+    // DB record creation is now handled asynchronously by the file-sync Lambda
+    // via S3 ObjectCreated event → SQS → Lambda pipeline.
     logAudit({
       userId: user.id,
       action: "FILE_UPLOAD",
       resource: "FileObject",
-      resourceId: fileRecord.id,
       status: "SUCCESS",
       ipAddress: extractIpFromRequest(request),
       details: { bucketId: bucket.id, bucketName: bucket.name, key, size },
     });
 
-    return NextResponse.json({
-      status: "success",
-      file: { ...fileRecord, size: Number(fileRecord.size) || 0 },
-    });
+    return NextResponse.json({ status: "accepted", key }, { status: 202 });
   } catch (error) {
     console.error("Complete Multipart error:", error);
     return NextResponse.json(

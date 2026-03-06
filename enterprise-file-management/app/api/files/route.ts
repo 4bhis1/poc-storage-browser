@@ -317,75 +317,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 4. Update or Create Record in DB (Upsert behavior without unique constraint)
-    const existingFile = await prisma.fileObject.findFirst({
-      where: {
-        bucketId: bucketId,
-        key: key,
-        isFolder: isFolder || false,
-      },
+    // DB record creation is now handled asynchronously by the file-sync Lambda
+    // via S3 event notification → SQS → Lambda pipeline.
+    logAudit({
+      userId: user.id,
+      action: isFolder ? "FOLDER_CREATE" : "FILE_UPLOAD",
+      resource: "FileObject",
+      status: "SUCCESS",
+      ipAddress: extractIpFromRequest(request),
+      details: { bucketId: bucket.id, bucketName: bucket.name, key, isFolder },
     });
 
-    let file;
-    if (existingFile) {
-      file = await prisma.fileObject.update({
-        where: { id: existingFile.id },
-        data: {
-          size: (size as number) || 0,
-          mimeType: (mimeType as string) || "application/octet-stream",
-          updatedAt: new Date(),
-          updatedBy: user.id,
-        },
-      });
-
-      if (!isFolder) {
-        logAudit({
-          userId: user.id,
-          action: "FILE_UPLOAD",
-          resource: "FileObject",
-          resourceId: file.id,
-          status: "SUCCESS",
-          details: { bucketId: bucket.id, bucketName: bucket.name, key, size },
-        });
-      }
-    } else {
-      file = await prisma.fileObject.create({
-        data: {
-          name,
-          bucketId,
-          tenantId: bucket.tenantId,
-          parentId: parentId || null,
-          isFolder: isFolder || false,
-          size: (size as number) || 0,
-          mimeType: (mimeType as string) || "application/octet-stream",
-          key: key,
-          createdBy: user.id,
-          updatedBy: user.id,
-        },
-      });
-
-      if (isFolder) {
-        logAudit({
-          userId: user.id,
-          action: "FOLDER_CREATE",
-          resource: "FileObject",
-          resourceId: file.id,
-          status: "SUCCESS",
-          details: { name, bucketId, bucketName: bucket.name, key },
-        });
-      } else {
-        logAudit({
-          userId: user.id,
-          action: "FILE_UPLOAD",
-          resource: "FileObject",
-          resourceId: file.id,
-          status: "SUCCESS",
-          details: { bucketId: bucket.id, bucketName: bucket.name, key, size },
-        });
-      }
-    }
-
-    return NextResponse.json({ ...file, size: Number(file.size) || 0 });
+    return NextResponse.json({ key, bucketId, status: "accepted" }, { status: 202 });
   } catch (error) {
     console.error("Failed to create file:", error);
     return NextResponse.json(

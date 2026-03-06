@@ -148,6 +148,13 @@ const cognitoPolicyAttachment = new aws.iam.RolePolicyAttachment(
 // SNS Topic for Share Notifications
 const snsTopic = new aws.sns.Topic("fms-share-notifications");
 
+// Dedicated EventBridge event bus for file events (cross-account BYOA events land here)
+// Declared early so it can be referenced in ECS env vars below
+const fileSyncEventBus = new aws.cloudwatch.EventBus("cams-file-events", {
+  name: "cams-file-events",
+  tags: { Purpose: "file-sync-cross-account" },
+});
+
 const snsSubscription = new aws.sns.TopicSubscription(
   "fms-share-notifications-sub",
   {
@@ -228,6 +235,10 @@ const service = new awsx.ecs.FargateService("app-svc", {
           name: "SNS_SHARE_NOTIFICATIONS_TOPIC_ARN",
           value: snsTopic.arn,
         },
+        {
+          name: "FILE_SYNC_EVENT_BUS_ARN",
+          value: fileSyncEventBus.arn,
+        },
       ],
     },
   },
@@ -240,3 +251,200 @@ const service = new awsx.ecs.FargateService("app-svc", {
 
 export const url = alb.loadBalancer.dnsName;
 export const dbEndpoint = db.endpoint;
+
+// ─── File Sync: SQS + Lambda + EventBridge ────────────────────────────────────
+
+// Dead-letter queue for failed file-sync messages
+const fileSyncDlq = new aws.sqs.Queue("file-sync-dlq", {
+  messageRetentionSeconds: 1209600, // 14 days
+  tags: { Purpose: "file-sync-dead-letter" },
+});
+
+// Main SQS queue — receives events from both same-account S3 and cross-account EventBridge
+const fileSyncQueue = new aws.sqs.Queue("file-sync-queue", {
+  visibilityTimeoutSeconds: 60, // Must be >= Lambda timeout
+  messageRetentionSeconds: 86400, // 1 day
+  redrivePolicy: fileSyncDlq.arn.apply(arn =>
+    JSON.stringify({ deadLetterTargetArn: arn, maxReceiveCount: 3 })
+  ),
+  tags: { Purpose: "file-sync" },
+});
+
+// Queue policy: allow S3 (same-account direct notifications) and EventBridge to send messages
+const fileSyncQueuePolicy = new aws.sqs.QueuePolicy("file-sync-queue-policy", {
+  queueUrl: fileSyncQueue.url,
+  policy: pulumi.all([fileSyncQueue.arn]).apply(([queueArn]) =>
+    JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [
+        {
+          Sid: "AllowS3DirectNotifications",
+          Effect: "Allow",
+          Principal: { Service: "s3.amazonaws.com" },
+          Action: "sqs:SendMessage",
+          Resource: queueArn,
+          Condition: {
+            ArnLike: { "aws:SourceArn": "arn:aws:s3:::*" },
+          },
+        },
+        {
+          Sid: "AllowEventBridgeForwarding",
+          Effect: "Allow",
+          Principal: { Service: "events.amazonaws.com" },
+          Action: "sqs:SendMessage",
+          Resource: queueArn,
+        },
+      ],
+    })
+  ),
+});
+
+// EventBridge bus resource policy: allow tenant accounts to PutEvents
+// Tenant account IDs should be managed dynamically; this allows any account in the org.
+// Tighten this to specific account IDs in production.
+const fileSyncEventBusPolicy = new aws.cloudwatch.EventBusPolicy(
+  "cams-file-events-policy",
+  {
+    eventBusName: fileSyncEventBus.name,
+    policy: pulumi.all([fileSyncEventBus.arn]).apply(([busArn]) =>
+      JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Sid: "AllowCrossAccountPutEvents",
+            Effect: "Allow",
+            Principal: { AWS: "*" },
+            Action: "events:PutEvents",
+            Resource: busArn,
+            // Restrict to your AWS Organization in production:
+            // Condition: { StringEquals: { "aws:PrincipalOrgID": "o-xxxxxxxxxx" } }
+          },
+        ],
+      })
+    ),
+  }
+);
+
+// EventBridge rule on our bus: forward all S3 file events to the SQS queue
+const fileSyncEventRule = new aws.cloudwatch.EventRule("file-sync-eb-rule", {
+  eventBusName: fileSyncEventBus.name,
+  description: "Forward cross-account S3 file events to file-sync SQS queue",
+  eventPattern: JSON.stringify({
+    source: ["aws.s3"],
+    "detail-type": [
+      "Object Created",
+      "Object Deleted",
+      "Object Restore Completed",
+    ],
+  }),
+  tags: { Purpose: "file-sync" },
+});
+
+const fileSyncEventTarget = new aws.cloudwatch.EventTarget(
+  "file-sync-eb-target",
+  {
+    rule: fileSyncEventRule.name,
+    eventBusName: fileSyncEventBus.name,
+    arn: fileSyncQueue.arn,
+  }
+);
+
+// Security group for Lambda — allows outbound to RDS
+const lambdaSg = new aws.ec2.SecurityGroup("file-sync-lambda-sg", {
+  vpcId: vpc.vpcId,
+  description: "File sync Lambda — outbound to RDS and internet",
+  egress: [
+    {
+      protocol: "-1",
+      fromPort: 0,
+      toPort: 0,
+      cidrBlocks: ["0.0.0.0/0"],
+    },
+  ],
+});
+
+// IAM role for the file-sync Lambda
+const lambdaRole = new aws.iam.Role("file-sync-lambda-role", {
+  assumeRolePolicy: JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Effect: "Allow",
+        Principal: { Service: "lambda.amazonaws.com" },
+        Action: "sts:AssumeRole",
+      },
+    ],
+  }),
+});
+
+// Attach managed policies
+new aws.iam.RolePolicyAttachment("file-sync-lambda-vpc", {
+  role: lambdaRole.name,
+  policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+});
+
+new aws.iam.RolePolicyAttachment("file-sync-lambda-basic", {
+  role: lambdaRole.name,
+  policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
+});
+
+// Inline policy: SQS consume permissions
+new aws.iam.RolePolicy("file-sync-lambda-sqs-policy", {
+  role: lambdaRole.name,
+  policy: pulumi.all([fileSyncQueue.arn, fileSyncDlq.arn]).apply(
+    ([queueArn, dlqArn]) =>
+      JSON.stringify({
+        Version: "2012-10-17",
+        Statement: [
+          {
+            Effect: "Allow",
+            Action: [
+              "sqs:ReceiveMessage",
+              "sqs:DeleteMessage",
+              "sqs:GetQueueAttributes",
+              "sqs:ChangeMessageVisibility",
+            ],
+            Resource: [queueArn, dlqArn],
+          },
+        ],
+      })
+  ),
+});
+
+// Lambda function — expects a pre-built zip at ../lambda/file-sync/function.zip
+// Build with: cd lambda/file-sync && npm run bundle
+const fileSyncLambda = new aws.lambda.Function("file-sync-lambda", {
+  runtime: aws.lambda.Runtime.NodeJS20dX,
+  handler: "index.handler",
+  role: lambdaRole.arn,
+  code: new pulumi.asset.FileArchive("../lambda/file-sync/function.zip"),
+  timeout: 30, // seconds — well under SQS visibility timeout of 60s
+  memorySize: 256,
+  vpcConfig: {
+    subnetIds: vpc.privateSubnetIds,
+    securityGroupIds: [lambdaSg.id],
+  },
+  environment: {
+    variables: {
+      DATABASE_URL: pulumi.interpolate`postgresql://myuser:mypassword123%21@${db.endpoint}/filemanagement?schema=public`,
+    },
+  },
+  tags: { Purpose: "file-sync" },
+});
+
+// SQS → Lambda event source mapping with batch processing config
+const fileSyncEventSourceMapping = new aws.lambda.EventSourceMapping(
+  "file-sync-esm",
+  {
+    eventSourceArn: fileSyncQueue.arn,
+    functionName: fileSyncLambda.arn,
+    batchSize: 10,
+    maximumBatchingWindowInSeconds: 5,
+    functionResponseTypes: ["ReportBatchItemFailures"],
+  }
+);
+
+export const fileSyncQueueUrl = fileSyncQueue.url;
+export const fileSyncQueueArn = fileSyncQueue.arn;
+export const fileSyncEventBusArn = fileSyncEventBus.arn;
+export const fileSyncLambdaArn = fileSyncLambda.arn;

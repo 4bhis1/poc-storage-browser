@@ -136,11 +136,17 @@ export async function GET(request: NextRequest) {
             : `attachment; filename="${name || key.split("/").pop()}"`,
       });
     } else {
-      // Default to Upload (PutObject)
+      // Default to Upload (PutObject) — embed uploader identity in metadata
+      // so the file-sync Lambda can recover it via HeadObject for audit logging
       command = new PutObjectCommand({
         Bucket: bucket.name,
         Key: key,
         ContentType: contentType,
+        Metadata: {
+          "uploaded-by-user-id": user.id,
+          "uploaded-by-type": botAuth ? "bot" : "user",
+          ...(botAuth ? { "uploaded-by-bot-id": botAuth.botId } : {}),
+        },
       });
     }
 

@@ -147,12 +147,8 @@ export async function DELETE(
       );
     }
 
-    // Delete from DB (Cascade should handle children if configured, but let's be safe)
-    // If we rely on cascade in Prisma schema for self-relation:
-    await prisma.fileObject.delete({
-      where: { id },
-    });
-
+    // DB record deletion is now handled asynchronously by the file-sync Lambda
+    // via S3 ObjectRemoved event → SQS → Lambda pipeline.
     logAudit({
       userId: user.id,
       action: "FILE_DELETE",
@@ -167,7 +163,7 @@ export async function DELETE(
       },
     });
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({ success: true, status: "accepted" }, { status: 202 });
   } catch (error) {
     console.error("Delete error:", error);
     return NextResponse.json(

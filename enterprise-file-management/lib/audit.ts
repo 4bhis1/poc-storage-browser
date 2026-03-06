@@ -27,7 +27,7 @@ export type AuditAction =
 export type AuditStatus = "SUCCESS" | "FAILED";
 
 export interface AuditParams {
-  userId: string;
+  userId: string | null;
   action: AuditAction;
   resource: string; // e.g. "FileObject", "Team", "ResourcePolicy"
   resourceId?: string; // the actual record id (optional)
