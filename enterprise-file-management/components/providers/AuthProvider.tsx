@@ -146,6 +146,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem('accessToken', token);
         localStorage.setItem('user', JSON.stringify(userData));
         setUser(userData);
+        
+        // Clear all bot diagnostics on login (fresh start)
+        fetch('/api/bot/clear-diagnostics', { method: 'POST' }).catch(() => {});
+        
         // Note: the login API already set accessToken + refreshToken as httpOnly cookies
         window.location.href = redirectPath;
     };

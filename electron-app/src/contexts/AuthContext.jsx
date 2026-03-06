@@ -12,6 +12,7 @@ export const AuthProvider = ({ children }) => {
     const [loading, setLoading]                   = useState(true);
     const [isBot, setIsBot]                       = useState(false);
     const [botName, setBotName]                   = useState(null);
+    const [isAutoLogin, setIsAutoLogin]           = useState(false);
     // NEW_PASSWORD_REQUIRED challenge state
     const [requiresNewPassword, setRequiresNewPassword] = useState(false);
     const [challengeSession, setChallengeSession] = useState(null);
@@ -35,14 +36,62 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
+    const _isTokenExpired = (token) => {
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1]));
+            return payload.exp ? payload.exp * 1000 < Date.now() : false;
+        } catch {
+            return true;
+        }
+    };
+
     const _hydrateFromSession = useCallback(async () => {
         if (!window.electronAPI?.auth) {
             setLoading(false);
             return;
         }
         try {
+            // Check if this machine has a registered bot identity — if so, prefer bot auth
+            const hasBotIdentity = window.electronAPI?.bot?.getBotId
+                ? (await window.electronAPI.bot.getBotId())?.botId
+                : null;
+
+            // If bot identity exists, attempt bot auto-login FIRST (takes priority)
+            if (hasBotIdentity && window.electronAPI?.bot?.attemptAutoLogin) {
+                console.log('[AuthContext] Bot identity found, attempting bot auto-login first...');
+                const autoLoginResult = await window.electronAPI.bot.attemptAutoLogin();
+                if (autoLoginResult.success) {
+                    console.log('[AuthContext] Bot auto-login successful');
+                    setToken(autoLoginResult.accessToken);
+                    setIsBot(true);
+                    setIsAutoLogin(true);
+                    
+                    // Decode bot name from JWT
+                    let resolvedBotName = 'Service Agent';
+                    try {
+                        const p = JSON.parse(atob(autoLoginResult.accessToken.split('.')[1]));
+                        if (p.botName) resolvedBotName = p.botName;
+                    } catch {}
+                    
+                    setBotName(resolvedBotName);
+                    setUser({ 
+                        email: autoLoginResult.email, 
+                        username: autoLoginResult.email, 
+                        name: resolvedBotName, 
+                        sub: autoLoginResult.botId 
+                    });
+                    
+                    window.electronAPI.initSync?.(autoLoginResult.accessToken);
+                    window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Auto-login bucket sync failed:', e));
+                    setLoading(false);
+                    return;
+                }
+                console.log('[AuthContext] Bot auto-login failed:', autoLoginResult.reason, '— falling through to SSO');
+            }
+
+            // No bot identity or bot login failed — try existing Cognito session
             const session = await window.electronAPI.auth.getSession();
-            if (session?.accessToken) {
+            if (session?.accessToken && !_isTokenExpired(session.idToken || session.accessToken)) {
                 setToken(session.accessToken);
                 const decoded = _decodeUser(session.idToken || session.accessToken);
                 setUser({ ...decoded, email: session.email || decoded.email });
@@ -50,6 +99,25 @@ export const AuthProvider = ({ children }) => {
                 window.electronAPI.initSync?.(session.idToken || session.accessToken);
                 // Populate buckets in local DB immediately
                 window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bucket sync failed:', e));
+                setLoading(false);
+                return;
+            }
+
+            // Cognito token expired — try silent refresh
+            if (session?.accessToken && _isTokenExpired(session.idToken || session.accessToken)) {
+                console.log('[AuthContext] Cognito token expired, attempting refresh...');
+                const refreshResult = await window.electronAPI.auth.refresh();
+                if (refreshResult?.success) {
+                    const newToken = refreshResult.idToken || refreshResult.accessToken;
+                    setToken(newToken);
+                    const decoded = _decodeUser(newToken);
+                    setUser({ ...decoded, email: session.email || decoded.email });
+                    window.electronAPI.initSync?.(newToken);
+                    window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bucket sync failed:', e));
+                    setLoading(false);
+                    return;
+                }
+                console.log('[AuthContext] Cognito refresh failed');
             }
         } catch (err) {
             console.warn('[AuthContext] Session hydration failed:', err);
@@ -99,6 +167,7 @@ export const AuthProvider = ({ children }) => {
         setUser(null);
         setIsBot(false);
         setBotName(null);
+        setIsAutoLogin(false);
         setRequiresNewPassword(false);
         setChallengeSession(null);
         setChallengeUsername(null);
@@ -185,7 +254,7 @@ export const AuthProvider = ({ children }) => {
             setToken(result.accessToken);
             setIsBot(true);
             // Decode botName from HS256 JWT payload (safe — not verifying, just reading)
-            let resolvedBotName = result.botName || 'Bot Agent';
+            let resolvedBotName = result.botName || 'Service Agent';
             try {
                 const p = JSON.parse(atob(result.accessToken.split('.')[1]));
                 if (p.botName) resolvedBotName = p.botName;
@@ -222,6 +291,7 @@ export const AuthProvider = ({ children }) => {
         session: challengeSession,
         isBot,
         botName,
+        isAutoLogin,
     };
 
     return (

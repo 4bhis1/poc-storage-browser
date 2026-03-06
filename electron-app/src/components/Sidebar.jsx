@@ -1,5 +1,5 @@
 import React from 'react';
-import { BarChart2, HardDrive, Clock, RefreshCw, LayoutGrid, FileUp } from 'lucide-react';
+import { BarChart2, HardDrive, Clock, RefreshCw, LayoutGrid, FileUp, Stethoscope } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
 const navGroups = [
@@ -21,6 +21,12 @@ const navGroups = [
     items: [
       { path: '/sync', label: 'Sync', icon: RefreshCw },
       { path: '/recent', label: 'Recent Activities', icon: Clock },
+    ]
+  },
+  {
+    title: "DIAGNOSTICS",
+    items: [
+      { path: '/doctor', label: 'Doctor', icon: Stethoscope },
     ]
   }
 ];

@@ -6,6 +6,7 @@ import { checkPermission } from "@/lib/rbac";
 import { getS3Client } from "@/lib/s3";
 import { logAudit } from "@/lib/audit";
 import { extractIpFromRequest } from "@/lib/ip-whitelist";
+import { verifyBotToken, assertBotBucketAccess } from "@/lib/bot-auth";
 
 export async function POST(request: NextRequest) {
   try {
@@ -13,20 +14,31 @@ export async function POST(request: NextRequest) {
     if (!token)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !payload.email)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // ── Bot JWT auth (HS256) ───────────────────────────────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const user = await prisma.user.findUnique({
-      where: { email: payload.email as string },
-      include: {
-        policies: true,
-        teams: {
-          where: { isDeleted: false },
-          include: { team: { include: { policies: true } } },
+    let user: any = null;
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
         },
-      },
-    });
+      });
+    } else {
+      const payload = await verifyToken(token);
+      if (!payload || typeof payload !== "object" || !payload.email)
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+      user = await prisma.user.findUnique({
+        where: { email: payload.email as string },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
+        },
+      });
+    }
 
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -49,14 +61,23 @@ export async function POST(request: NextRequest) {
     if (!bucket)
       return NextResponse.json({ error: "Bucket not found" }, { status: 404 });
 
-    const hasAccess = await checkPermission(user, "WRITE", {
-      tenantId: bucket.tenantId,
-      resourceType: "bucket",
-      resourceId: bucket.id,
-    });
-
-    if (!hasAccess) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // ── Bot: validate bucket + UPLOAD permission ──────────────────────────
+    if (botAuth) {
+      if (!assertBotBucketAccess(botAuth, bucketId, "UPLOAD") &&
+          !assertBotBucketAccess(botAuth, bucketId, "WRITE")) {
+        return NextResponse.json(
+          { error: "Forbidden: bot lacks UPLOAD access to this bucket" },
+          { status: 403 },
+        );
+      }
+    } else {
+      const hasAccess = await checkPermission(user, "WRITE", {
+        tenantId: bucket.tenantId,
+        resourceType: "bucket",
+        resourceId: bucket.id,
+      });
+      if (!hasAccess)
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const account = bucket.account;

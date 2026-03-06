@@ -16,6 +16,10 @@ import {
   Trash2,
   Upload,
   Calendar as CalendarIcon,
+  Wifi,
+  WifiOff,
+  AlertTriangle,
+  CheckCircle2,
 } from "lucide-react"
 import Link from "next/link"
 import { format, differenceInDays } from "date-fns"
@@ -46,6 +50,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { formatBytes, formatDateTime } from "@/lib/mock-data"
 import { SearchCommandDialog } from "@/components/search-command"
 import { getAuditLogs, getDashboardStats, type DashboardStats } from "@/app/actions/audit"
+import { getAgentStatus } from "@/app/actions/agent"
 import * as React from "react"
 import { useEffect, useState } from "react"
 import { useAuth } from "@/components/providers/AuthProvider"
@@ -69,6 +74,7 @@ export default function OverviewPage() {
   const { user } = useAuth()
   const [recentLogs, setRecentLogs] = useState<any[]>([])
   const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null)
+  const [agentStatus, setAgentStatus] = useState<any>(null)
   const [statsLoading, setStatsLoading] = useState(true)
 
   const [timeRange, setTimeRange] = useState<string>("all")
@@ -81,6 +87,9 @@ export default function OverviewPage() {
     setStatsLoading(true)
     getAuditLogs().then((res) => {
       if (res.success && res.data) setRecentLogs(res.data.slice(0, 6))
+    })
+    getAgentStatus().then((res) => {
+      if (res.success) setAgentStatus(res.data)
     })
     const statsFilters = filters || { timeRange }
     if (timeRange === "custom" && dateRange?.from && dateRange?.to) {
@@ -100,7 +109,10 @@ export default function OverviewPage() {
         setRecentLogs(res.data.slice(0, 6))
       }
     })
-  }, []) // Audit logs loaded once
+    getAgentStatus().then((res) => {
+      if (res.success) setAgentStatus(res.data)
+    })
+  }, []) // Audit logs + agent status loaded once
 
   useEffect(() => {
     if (timeRange === "custom" && (!dateRange?.from || !dateRange?.to)) {
@@ -277,6 +289,62 @@ export default function OverviewPage() {
 
       <div className="flex-1 overflow-auto">
         <div className="p-6 space-y-6">
+          {/* Agent Status Alert */}
+          {agentStatus && agentStatus.status !== 'ONLINE' && (
+            <div className={`rounded-lg border-2 p-4 ${
+              agentStatus.status === 'OFFLINE'
+                ? 'border-yellow-200 bg-yellow-50 dark:bg-yellow-950/20'
+                : 'border-slate-200 bg-slate-50 dark:bg-slate-900'
+            }`}>
+              <div className="flex items-start gap-3">
+                <div className={`p-2 rounded-lg ${
+                  agentStatus.status === 'OFFLINE'
+                    ? 'bg-yellow-100'
+                    : 'bg-slate-100'
+                }`}>
+                  {agentStatus.status === 'OFFLINE' ? (
+                    <WifiOff className="h-5 w-5 text-yellow-600" />
+                  ) : (
+                    <AlertTriangle className="h-5 w-5 text-slate-400" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <p className={`font-semibold ${
+                    agentStatus.status === 'OFFLINE'
+                      ? 'text-yellow-800 dark:text-yellow-300'
+                      : 'text-slate-700 dark:text-slate-300'
+                  }`}>
+                    {agentStatus.status === 'OFFLINE' ? 'Agent Offline' : 'Agent Not Connected'}
+                  </p>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    {agentStatus.status === 'OFFLINE' && agentStatus.lastHeartbeatAt
+                      ? `Last seen ${new Date(agentStatus.lastHeartbeatAt).toLocaleString()}`
+                      : 'No heartbeat received yet'}
+                  </p>
+                  {agentStatus.diagnostics && agentStatus.diagnostics.total > 0 && (
+                    <div className="flex gap-4 mt-2 text-xs">
+                      <span className="flex items-center gap-1">
+                        <CheckCircle2 className="h-3 w-3 text-green-600" />
+                        {agentStatus.diagnostics.passed} passed
+                      </span>
+                      {agentStatus.diagnostics.warnings > 0 && (
+                        <span className="flex items-center gap-1">
+                          <AlertTriangle className="h-3 w-3 text-yellow-600" />
+                          {agentStatus.diagnostics.warnings} warnings
+                        </span>
+                      )}
+                      {agentStatus.diagnostics.failed > 0 && (
+                        <span className="flex items-center gap-1 text-red-600">
+                          ✕ {agentStatus.diagnostics.failed} failed
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Stat Cards */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
             {stats.map((stat) => (

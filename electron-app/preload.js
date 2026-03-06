@@ -106,6 +106,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
     saveBotId:       (botId)    => ipcRenderer.invoke('bot:save-bot-id', { botId }),
     getBotId:        ()         => ipcRenderer.invoke('bot:get-bot-id'),
     handshake:       (botId)    => ipcRenderer.invoke('bot:handshake', { botId }),
+    attemptAutoLogin: ()        => ipcRenderer.invoke('bot:attempt-auto-login'),
     deregister:      ()         => ipcRenderer.invoke('bot:deregister'),
+  },
+
+  // 10. Doctor Diagnostics
+  doctor: {
+    getHeartbeatHistory:  (minutes) => ipcRenderer.invoke('doctor:get-heartbeat-history', minutes),
+    runDiagnostics:       ()        => ipcRenderer.invoke('doctor:run-diagnostics'),
+    runSingle:            (name)    => ipcRenderer.invoke('doctor:run-single', name),
+    getLastDiagnostics:   ()        => ipcRenderer.invoke('doctor:get-last-diagnostics'),
+    onDoctorProgress: (cb) => {
+      const sub = (_, val) => cb(val);
+      ipcRenderer.on('doctor:progress', sub);
+      return () => ipcRenderer.removeListener('doctor:progress', sub);
+    },
+    onHeartbeatStatus: (cb) => {
+      const sub = (_, val) => cb(val);
+      ipcRenderer.on('heartbeat:status', sub);
+      return () => ipcRenderer.removeListener('heartbeat:status', sub);
+    },
   },
 });

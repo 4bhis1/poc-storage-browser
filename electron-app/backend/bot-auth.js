@@ -8,8 +8,35 @@
 
 const crypto = require('crypto');
 const axios  = require('axios');
+const os     = require('os');
 
 const API_URL = process.env.ENTERPRISE_URL || 'http://localhost:3000';
+
+// ── Machine-specific encryption key ──────────────────────────────────────────
+function getMachineKey() {
+  const hostname = os.hostname();
+  const userInfo = os.userInfo();
+  const machineId = `${hostname}-${userInfo.username}`;
+  return crypto.createHash('sha256').update(machineId).digest();
+}
+
+function encryptPrivateKey(privateKeyPem) {
+  const machineKey = getMachineKey();
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipher('aes-256-cbc', machineKey);
+  let encrypted = cipher.update(privateKeyPem, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  return iv.toString('hex') + ':' + encrypted;
+}
+
+function decryptPrivateKey(encryptedData) {
+  const machineKey = getMachineKey();
+  const [ivHex, encrypted] = encryptedData.split(':');
+  const decipher = crypto.createDecipher('aes-256-cbc', machineKey);
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
+  return decrypted;
+}
 
 // ── Lazy store ────────────────────────────────────────────────────────────────
 let _store = null;
@@ -42,11 +69,13 @@ function generateKeyPair() {
   });
 
   const store = getStore();
-  store.set('privateKeyPem', privateKey);
+  // Encrypt private key with machine-specific key
+  const encryptedPrivateKey = encryptPrivateKey(privateKey);
+  store.set('privateKeyPem', encryptedPrivateKey);
   store.set('publicKeyPem',  publicKey);
   store.set('botId', '');
 
-  console.log('[BotAuth] New Ed25519 key pair generated and stored');
+  console.log('[BotAuth] New Ed25519 key pair generated and stored (machine-encrypted)');
   return publicKey; // standard PEM with newlines — safe to paste
 }
 
@@ -77,8 +106,18 @@ function clearBotIdentity() {
 // ── JWT Signing ───────────────────────────────────────────────────────────────
 
 function signClaim(botId) {
-  const privateKeyPem = getStore().get('privateKeyPem');
-  if (!privateKeyPem) throw new Error('No private key found — generate a key pair first');
+  const encryptedPrivateKey = getStore().get('privateKeyPem');
+  if (!encryptedPrivateKey) throw new Error('No private key found — generate a key pair first');
+
+  let privateKeyPem;
+  try {
+    // Try to decrypt with machine key first
+    privateKeyPem = decryptPrivateKey(encryptedPrivateKey);
+  } catch (err) {
+    // Fallback for legacy unencrypted keys
+    console.warn('[BotAuth] Using legacy unencrypted private key');
+    privateKeyPem = encryptedPrivateKey;
+  }
 
   const storedBotId = getStore().get('botId');
   console.log('[BotAuth] signClaim — botId arg:', botId, '| stored botId:', storedBotId);

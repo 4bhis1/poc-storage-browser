@@ -4,6 +4,7 @@ import { verifyToken } from "@/lib/token";
 import { Prisma } from "@/lib/generated/prisma/client";
 import { logAudit } from "@/lib/audit";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
+import { verifyBotToken } from "@/lib/bot-auth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -11,35 +12,59 @@ export async function GET(request: NextRequest) {
     if (!token)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !payload.email) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+    // ── Bot JWT auth (HS256) — checked before Cognito ─────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const email = payload.email as string;
+    let dbUser: any = null;
+    let tenantId: string;
 
-    // Look up full user from DB including role and policies for RBAC
-    const dbUser = await prisma.user.findUnique({
-      where: { email },
-      select: {
-        id: true,
-        tenantId: true,
-        role: true,
-        policies: true,
-        teams: {
-          where: { isDeleted: false },
-          include: {
-            team: { include: { policies: true } },
+    if (botAuth) {
+      dbUser = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        select: {
+          id: true,
+          tenantId: true,
+          role: true,
+          policies: true,
+          teams: {
+            where: { isDeleted: false },
+            include: { team: { include: { policies: true } } },
           },
         },
-      },
-    });
+      });
+      tenantId = botAuth.tenantId;
+    } else {
+      const payload = await verifyToken(token);
+      if (!payload || typeof payload !== "object" || !payload.email) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      }
 
-    if (!dbUser?.tenantId) {
-      return NextResponse.json(
-        { error: "No tenant assigned to user" },
-        { status: 403 },
-      );
+      const email = payload.email as string;
+      dbUser = await prisma.user.findUnique({
+        where: { email },
+        select: {
+          id: true,
+          tenantId: true,
+          role: true,
+          policies: true,
+          teams: {
+            where: { isDeleted: false },
+            include: { team: { include: { policies: true } } },
+          },
+        },
+      });
+
+      if (!dbUser?.tenantId) {
+        return NextResponse.json(
+          { error: "No tenant assigned to user" },
+          { status: 403 },
+        );
+      }
+      tenantId = dbUser.tenantId;
+    }
+
+    if (!dbUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const clientIp = extractIpFromRequest(request);
@@ -62,12 +87,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const tenantId = dbUser.tenantId;
-
-    // ── RBAC: Compute allowed bucket IDs for TEAMMATE ────────────────────
+    // ── RBAC / Bot: Compute allowed bucket IDs ────────────────────────────
     let allowedBucketIdFilter: string[] | null = null; // null = all buckets
 
-    if (dbUser.role !== "PLATFORM_ADMIN" && dbUser.role !== "TENANT_ADMIN") {
+    if (botAuth) {
+      // Bot: strictly scoped to permitted buckets only
+      if (botAuth.allowedBucketIds.length === 0) {
+        return NextResponse.json({
+          data: [],
+          metadata: { total: 0, page: 1, limit: 10, totalPages: 0 },
+        });
+      }
+      allowedBucketIdFilter = botAuth.allowedBucketIds;
+    } else if (dbUser.role !== "PLATFORM_ADMIN" && dbUser.role !== "TENANT_ADMIN") {
       // Collect policies from direct assignments AND team memberships
       const allPolicies: any[] = [
         ...(dbUser.policies || []),
@@ -93,7 +125,6 @@ export async function GET(request: NextRequest) {
 
         allowedBucketIdFilter = [...new Set(bucketIds)];
 
-        // No accessible buckets → return empty
         if (allowedBucketIdFilter.length === 0) {
           return NextResponse.json({
             data: [],
@@ -111,6 +142,14 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "10");
     const skip = (page - 1) * limit;
+
+    // ── Bot: validate explicit bucketId param ─────────────────────────────
+    if (botAuth && bucketId && !botAuth.allowedBucketIds.includes(bucketId)) {
+      return NextResponse.json(
+        { error: "Forbidden: bot lacks access to this bucket" },
+        { status: 403 },
+      );
+    }
 
     // ── Build type-filter mime conditions (shared between both paths) ──────
     type MimeFilter = { mimeType?: object; name?: object; OR?: MimeFilter[] };

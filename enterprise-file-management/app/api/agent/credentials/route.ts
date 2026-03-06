@@ -25,56 +25,50 @@ import { verifyToken } from '@/lib/token';
 import { getTenantAwsCredentials } from '@/lib/aws/sts';
 import { decrypt } from '@/lib/encryption';
 import { logAudit } from '@/lib/audit';
+import { verifyBotToken } from '@/lib/bot-auth';
 
 export async function POST(request: NextRequest) {
   try {
-    // 1. Verify JWT token (works for both users and bots)
     const authHeader = request.headers.get('Authorization');
     const token = authHeader?.split(' ')[1];
-    
+
     if (!token) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const payload = await verifyToken(token);
-    if (!payload) {
-      return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-    }
+    // ── Bot JWT auth (HS256) first ─────────────────────────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const email = (payload.email as string) || '';
-    if (!email) {
-      return NextResponse.json({ error: 'Invalid token payload' }, { status: 401 });
-    }
-
-    // 2. Determine identity type (user or bot) and validate
     let tenantId: string | null = null;
     let identityType: 'user' | 'bot' = 'user';
     let identityId: string = '';
     let identityName: string = '';
 
-    // Check if this is a bot
-    const bot = await prisma.botIdentity.findFirst({
-      where: { 
-        user: { email },
-        isActive: true,
-      },
-      include: { user: true },
-    });
-
-    if (bot) {
-      // Bot authentication
+    if (botAuth) {
+      // Bot authenticated via HS256 JWT
+      const bot = await prisma.botIdentity.findUnique({
+        where: { id: botAuth.botId },
+      });
+      if (!bot || !bot.isActive) {
+        return NextResponse.json({ error: 'Bot not found or revoked' }, { status: 403 });
+      }
       identityType = 'bot';
       identityId = bot.id;
       identityName = bot.name;
       tenantId = bot.tenantId;
-      
-      console.log(`[AgentCredentials] Bot request: ${bot.name} (${bot.id})`);
     } else {
-      // User authentication
-      const user = await prisma.user.findUnique({
-        where: { email },
-      });
+      // Fall back to Cognito RS256
+      const payload = await verifyToken(token);
+      if (!payload) {
+        return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
+      }
 
+      const email = (payload.email as string) || '';
+      if (!email) {
+        return NextResponse.json({ error: 'Invalid token payload' }, { status: 401 });
+      }
+
+      const user = await prisma.user.findUnique({ where: { email } });
       if (!user || !user.isActive) {
         return NextResponse.json({ error: 'User not found or inactive' }, { status: 403 });
       }
@@ -82,8 +76,6 @@ export async function POST(request: NextRequest) {
       identityId = user.id;
       identityName = user.name || user.email;
       tenantId = user.tenantId;
-      
-      console.log(`[AgentCredentials] User request: ${user.email} (${user.id})`);
     }
 
     if (!tenantId) {

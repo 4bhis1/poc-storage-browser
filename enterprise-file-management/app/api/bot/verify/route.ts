@@ -1,6 +1,6 @@
 /**
  * POST /api/bot/verify
- * Phase C Handshake — verifies EdDSA signed JWT and issues app-level tokens.
+ * Phase C Handshake — verifies EdDSA signed JWT and issues app-level tokens for service accounts.
  */
 
 import { NextRequest, NextResponse } from 'next/server';

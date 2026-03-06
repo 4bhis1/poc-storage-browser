@@ -39,8 +39,8 @@ export async function checkPermission(
     return true;
   }
 
-  // 4. Teammate: Check Policies
-  if (user.role === Role.TEAMMATE) {
+  // 4. Teammate or Team Admin: Check Policies
+  if (user.role === Role.TEAMMATE || user.role === Role.TEAM_ADMIN) {
     let allPolicies: any[] = [];
 
     if (user.policies) {

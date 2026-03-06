@@ -361,6 +361,9 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
                 if (mainWindow) mainWindow.webContents.send('auth-expired');
             });
 
+            // Start health reporter
+            backend.healthReporter.start(rootPath);
+
             if (mainWindow) {
                 mainWindow.webContents.send('sso-auth-result', { idToken: accessToken, refreshToken, email });
                 if (mainWindow.isMinimized()) mainWindow.restore();
@@ -415,10 +418,54 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
                 if (mainWindow) mainWindow.webContents.send('auth-expired');
             });
 
+            // Start health reporter
+            backend.healthReporter.start(rootPath);
+
             return { success: true, accessToken: result.accessToken, email: result.email };
         } catch (err) {
             console.error('[IPC] bot:handshake error:', err.message);
             return { success: false, error: err.message };
+        }
+    });
+
+    // Auto-login attempt on startup
+    ipcMain.handle('bot:attempt-auto-login', async () => {
+        try {
+            if (!botAuth.hasKeyPair() || !botAuth.getBotId()) {
+                return { success: false, reason: 'no_credentials' };
+            }
+
+            const botId = botAuth.getBotId();
+            const result = await botAuth.performHandshake(botId);
+            
+            authManager.login({
+                accessToken:  result.accessToken,
+                idToken:      result.accessToken,
+                refreshToken: result.refreshToken,
+                username:     result.email,
+                email:        result.email,
+            });
+
+            // Start heartbeat in bot mode
+            const heartbeat = require('../backend/heartbeat');
+            heartbeat.start('bot', () => {
+                if (mainWindow) mainWindow.webContents.send('auth-expired');
+            });
+
+            // Start health reporter
+            backend.healthReporter.start(rootPath);
+
+            console.log('[IPC] Auto-login successful for bot:', botId);
+            return { 
+                success: true, 
+                accessToken: result.accessToken, 
+                email: result.email,
+                botId,
+                isAutoLogin: true
+            };
+        } catch (err) {
+            console.error('[IPC] Auto-login failed:', err.message);
+            return { success: false, error: err.message, reason: 'handshake_failed' };
         }
     });
 
@@ -428,6 +475,37 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
         const heartbeat = require('../backend/heartbeat');
         heartbeat.stop();
         return { success: true };
+    });
+
+    // ── 10. Doctor Diagnostics ──────────────────────────────────────────────
+
+    ipcMain.handle('doctor:get-heartbeat-history', async (event, minutes = 60) => {
+        return await backend.heartbeat.getHeartbeatHistory(minutes);
+    });
+
+    ipcMain.handle('doctor:run-diagnostics', async () => {
+        return await backend.doctor.runAll(rootPath);
+    });
+
+    ipcMain.handle('doctor:get-last-diagnostics', async () => {
+        return await backend.doctor.getLastDiagnostics();
+    });
+
+    ipcMain.handle('doctor:run-single', async (event, diagnosticName) => {
+        const methodMap = {
+            'Clock Skew': () => backend.doctor.checkClockSkew(),
+            'Disk I/O': () => backend.doctor.checkDiskIO(rootPath),
+            'Multipart Handshake': async () => {
+                const bucket = await backend.doctor._getFirstBucket();
+                return bucket
+                    ? backend.doctor.checkMultipartHandshake(bucket.id)
+                    : backend.doctor._skipMultipart();
+            },
+            'Proxy Detection': () => backend.doctor.checkProxyDetection(),
+            'Service Health': () => backend.doctor.checkServiceHealth(),
+        };
+        const method = methodMap[diagnosticName];
+        return method ? await method() : { name: diagnosticName, status: 'fail', detail: 'Unknown diagnostic', durationMs: 0 };
     });
 }
 

@@ -9,14 +9,28 @@ import { logAudit } from "@/lib/audit";
 import { checkPermission } from "@/lib/rbac";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 import { getCurrentUser } from "@/lib/session";
+import { verifyBotToken, assertBotBucketAccess } from "@/lib/bot-auth";
 
 export async function GET(request: NextRequest) {
   try {
-    let user = await getCurrentUser();
-    if (!user) {
-      const token = request.headers.get("Authorization")?.split(" ")[1];
-      if (token) {
-        const payload = await verifyToken(token);
+    // ── Bot JWT auth (HS256) — must be checked before session/Cognito ──────
+    const bearerToken = request.headers.get("Authorization")?.split(" ")[1];
+    const botAuth = bearerToken ? await verifyBotToken(bearerToken) : null;
+
+    let user: any = null;
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: {
+          tenant: true,
+          policies: true,
+          teams: { include: { team: { include: { policies: true } } } },
+        },
+      });
+    } else {
+      user = await getCurrentUser();
+      if (!user && bearerToken) {
+        const payload = await verifyToken(bearerToken);
         if (payload && typeof payload === "object" && payload.email) {
           user = await prisma.user.findUnique({
             where: { email: payload.email as string },
@@ -60,8 +74,29 @@ export async function GET(request: NextRequest) {
     const syncAll = searchParams.get("syncAll") === "true";
     const q = searchParams.get("q")?.trim();
 
+    // ── Bot: validate bucketId against permitted buckets ──────────────────
+    if (botAuth) {
+      if (bucketId) {
+        if (!assertBotBucketAccess(botAuth, bucketId, "READ")) {
+          return NextResponse.json(
+            { error: "Forbidden: bot lacks READ access to this bucket" },
+            { status: 403 },
+          );
+        }
+      } else if (botAuth.allowedBucketIds.length === 0) {
+        return NextResponse.json([]);
+      }
+    }
+
     const where: any = {};
-    if (bucketId) where.bucketId = bucketId;
+
+    if (bucketId) {
+      where.bucketId = bucketId;
+    } else if (botAuth) {
+      // No bucketId specified — scope to all permitted buckets
+      where.bucketId = { in: botAuth.allowedBucketIds };
+    }
+
     if (parentId) {
       where.parentId = parentId;
     } else if (bucketId && !syncAll) {
@@ -140,20 +175,37 @@ export async function POST(request: NextRequest) {
     if (!token)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !payload.email)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // ── Bot JWT auth (HS256) ───────────────────────────────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const user = await prisma.user.findUnique({
-      where: { email: payload.email as string },
-      include: {
-        policies: true,
-        teams: {
-          where: { isDeleted: false },
-          include: { team: { include: { policies: true } } },
+    let user: any = null;
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: {
+          policies: true,
+          teams: {
+            where: { isDeleted: false },
+            include: { team: { include: { policies: true } } },
+          },
         },
-      },
-    });
+      });
+    } else {
+      const payload = await verifyToken(token);
+      if (!payload || typeof payload !== "object" || !payload.email)
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+      user = await prisma.user.findUnique({
+        where: { email: payload.email as string },
+        include: {
+          policies: true,
+          teams: {
+            where: { isDeleted: false },
+            include: { team: { include: { policies: true } } },
+          },
+        },
+      });
+    }
 
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -188,6 +240,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // ── Bot: validate bucket access and required permission ───────────────
+    if (botAuth) {
+      const requiredPerm = isFolder ? "WRITE" : "UPLOAD";
+      if (!botAuth.allowedBucketIds.includes(bucketId) ||
+          (!botAuth.hasBucketPermission(bucketId, requiredPerm) &&
+           !botAuth.hasBucketPermission(bucketId, "WRITE"))) {
+        return NextResponse.json(
+          { error: "Forbidden: bot lacks WRITE/UPLOAD access to this bucket" },
+          { status: 403 },
+        );
+      }
+    }
+
     // 1. Fetch Bucket and Account to get credentials
     const bucket = await prisma.bucket.findUnique({
       where: { id: bucketId },
@@ -198,14 +263,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Bucket not found" }, { status: 404 });
     }
 
-    const hasAccess = await checkPermission(user, "WRITE", {
-      tenantId: bucket.tenantId,
-      resourceType: "bucket",
-      resourceId: bucket.id,
-    });
+    // For non-bot users, check RBAC permission
+    if (!botAuth) {
+      const hasAccess = await checkPermission(user, "WRITE", {
+        tenantId: bucket.tenantId,
+        resourceType: "bucket",
+        resourceId: bucket.id,
+      });
 
-    if (!hasAccess) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      if (!hasAccess) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
     }
 
     const account = bucket.account;

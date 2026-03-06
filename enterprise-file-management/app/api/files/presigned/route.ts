@@ -8,6 +8,7 @@ import { checkPermission } from "@/lib/rbac";
 import { getS3Client } from "@/lib/s3";
 import { logAudit } from "@/lib/audit";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
+import { verifyBotToken, assertBotBucketAccess } from "@/lib/bot-auth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -15,20 +16,31 @@ export async function GET(request: NextRequest) {
     if (!token)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !payload.email)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // ── Bot JWT auth (HS256) ───────────────────────────────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const user = await prisma.user.findUnique({
-      where: { email: payload.email as string },
-      include: {
-        policies: true,
-        teams: {
-          where: { isDeleted: false },
-          include: { team: { include: { policies: true } } },
+    let user: any = null;
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
         },
-      },
-    });
+      });
+    } else {
+      const payload = await verifyToken(token);
+      if (!payload || typeof payload !== "object" || !payload.email)
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+      user = await prisma.user.findUnique({
+        where: { email: payload.email as string },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
+        },
+      });
+    }
 
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -41,11 +53,7 @@ export async function GET(request: NextRequest) {
         resource: "FileObject",
         status: "FAILED",
         ipAddress: clientIp,
-        details: {
-          reason: "IP not whitelisted for team",
-          method: request.method,
-          path: request.nextUrl.pathname,
-        },
+        details: { reason: "IP not whitelisted for team", method: request.method, path: request.nextUrl.pathname },
       });
       return NextResponse.json(
         { error: "Forbidden: IP not whitelisted for your team" },
@@ -55,19 +63,14 @@ export async function GET(request: NextRequest) {
 
     const searchParams = request.nextUrl.searchParams;
     const bucketId = searchParams.get("bucketId");
-    const action = searchParams.get("action"); // 'upload' or 'download'
+    const action = searchParams.get("action");
     const parentId = searchParams.get("parentId");
-    const contentType =
-      searchParams.get("contentType") ?? "application/octet-stream";
+    const contentType = searchParams.get("contentType") ?? "application/octet-stream";
     const name = searchParams.get("name");
     const paramKey = searchParams.get("key");
 
-    // Verify Bucket Access
     if (!bucketId)
-      return NextResponse.json(
-        { error: "Bucket ID required" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Bucket ID required" }, { status: 400 });
 
     const bucket = await prisma.bucket.findUnique({
       where: { id: bucketId },
@@ -77,23 +80,29 @@ export async function GET(request: NextRequest) {
     if (!bucket)
       return NextResponse.json({ error: "Bucket not found" }, { status: 404 });
 
-    // Determine required permission based on action
-    let requiredPermission: "READ" | "WRITE" | "DOWNLOAD" = "WRITE";
-    if (action === "download") {
-      requiredPermission = "DOWNLOAD";
-    } else if (action === "read") {
-      requiredPermission = "READ";
-    }
+    // ── Bot: validate bucket + action permission ──────────────────────────
+    if (botAuth) {
+      const requiredPerm = action === "download" || action === "read" ? "DOWNLOAD" : "UPLOAD";
+      if (!assertBotBucketAccess(botAuth, bucketId, requiredPerm) &&
+          !assertBotBucketAccess(botAuth, bucketId, "WRITE")) {
+        return NextResponse.json(
+          { error: "Forbidden: bot lacks access to this bucket for this action" },
+          { status: 403 },
+        );
+      }
+    } else {
+      // Determine required permission based on action
+      let requiredPermission: "READ" | "WRITE" | "DOWNLOAD" = "WRITE";
+      if (action === "download") requiredPermission = "DOWNLOAD";
+      else if (action === "read") requiredPermission = "READ";
 
-    // Check Permission
-    const hasAccess = await checkPermission(user, requiredPermission, {
-      tenantId: bucket.tenantId,
-      resourceType: "bucket",
-      resourceId: bucket.id,
-    });
-
-    if (!hasAccess) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      const hasAccess = await checkPermission(user, requiredPermission, {
+        tenantId: bucket.tenantId,
+        resourceType: "bucket",
+        resourceId: bucket.id,
+      });
+      if (!hasAccess)
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const account = bucket.account;
