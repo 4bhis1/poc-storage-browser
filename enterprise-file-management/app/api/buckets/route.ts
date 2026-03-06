@@ -4,6 +4,8 @@ import { getCurrentUser } from "@/lib/session";
 import { Role } from "@/lib/generated/prisma/client";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 import { logAudit } from "@/lib/audit";
+import { verifyBotToken } from "@/lib/bot-auth";
+import { verifyToken } from "@/lib/token";
 
 // ─── GET /api/buckets ──────────────────────────────────────────────────────
 // Returns buckets from DB only (no AWS API call).
@@ -11,7 +13,31 @@ import { logAudit } from "@/lib/audit";
 // TEAMMATE sees only buckets they have policy access to.
 export async function GET(request: NextRequest) {
   try {
-    const user = await getCurrentUser();
+    // ── Bot JWT auth (HS256) — must be checked before session/Cognito ──────
+    const authHeader = request.headers.get("Authorization");
+    const bearerToken = authHeader?.split(" ")[1];
+    const botAuth = bearerToken ? await verifyBotToken(bearerToken) : null;
+
+    let user: any = null;
+
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: { policies: true, teams: { include: { team: { include: { policies: true } } } } },
+      });
+    } else {
+      user = await getCurrentUser();
+      if (!user && bearerToken) {
+        const payload = await verifyToken(bearerToken);
+        if (payload?.email) {
+          user = await prisma.user.findUnique({
+            where: { email: payload.email as string },
+            include: { policies: true, teams: { include: { team: { include: { policies: true } } } } },
+          });
+        }
+      }
+    }
+
     if (!user)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -45,8 +71,19 @@ export async function GET(request: NextRequest) {
 
     let whereClause: any = {};
 
-    // Base RBAC filters
-    if (user.role === Role.PLATFORM_ADMIN) {
+    // ── Bot: scope strictly to permitted buckets only ─────────────────────
+    if (botAuth) {
+      if (botAuth.allowedBucketIds.length === 0) {
+        return NextResponse.json({
+          data: [],
+          metadata: { total: 0, page, limit, totalPages: 0 },
+        });
+      }
+      whereClause = {
+        id: { in: botAuth.allowedBucketIds },
+        tenantId: botAuth.tenantId,
+      };
+    } else if (user.role === Role.PLATFORM_ADMIN) {
       // See everything
     } else if (user.role === Role.TENANT_ADMIN) {
       whereClause = { tenantId: user.tenantId };
