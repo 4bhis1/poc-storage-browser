@@ -22,10 +22,14 @@ interface CFNData {
     externalId: string
 }
 
-export function LinkAwsAccountForm({ tenants }: { tenants: Tenant[] }) {
+export function LinkAwsAccountForm({ tenants, preselectedTenantId, onSuccess }: { 
+    tenants: Tenant[]
+    preselectedTenantId?: string
+    onSuccess?: () => void
+}) {
     const router = useRouter()
     const searchParams = useSearchParams()
-    const urlTenantId = searchParams.get("tenantId")
+    const urlTenantId = preselectedTenantId || searchParams.get("tenantId")
     const { toast } = useToast()
 
     const [step, setStep] = useState(1)
@@ -103,11 +107,6 @@ export function LinkAwsAccountForm({ tenants }: { tenants: Tenant[] }) {
     }
 
     const handleSubmitValidation = async () => {
-        if (!friendlyName) {
-            toast({ title: "Missing fields", description: "Please provide a friendly name." })
-            return
-        }
-
         setIsSubmitting(true)
         try {
             const payload = {
@@ -129,7 +128,11 @@ export function LinkAwsAccountForm({ tenants }: { tenants: Tenant[] }) {
 
             if (result.success) {
                 toast({ title: "Account Linked", description: "AWS Account is successfully registered and validation has started." })
-                router.push("/superadmin/aws-accounts")
+                if (onSuccess) {
+                    onSuccess()
+                } else {
+                    router.push("/superadmin/aws-accounts")
+                }
                 router.refresh()
             } else {
                 toast({ title: "Error", description: result.error || "Failed to link account." })
@@ -173,6 +176,26 @@ export function LinkAwsAccountForm({ tenants }: { tenants: Tenant[] }) {
                         </div>
 
                         <div className="space-y-2">
+                            <Label htmlFor="friendlyName">Account Name</Label>
+                            <Input
+                                id="friendlyName"
+                                placeholder="e.g. Production AWS Account"
+                                value={friendlyName}
+                                onChange={(e) => setFriendlyName(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <Label htmlFor="description">Description <span className="text-muted-foreground text-xs">(optional)</span></Label>
+                            <Textarea
+                                id="description"
+                                placeholder="Purpose of this account link..."
+                                value={description}
+                                onChange={(e) => setDescription(e.target.value)}
+                            />
+                        </div>
+
+                        <div className="space-y-2">
                             <Label htmlFor="awsAccountId">AWS Account ID</Label>
                             <Input 
                                 id="awsAccountId" 
@@ -207,7 +230,7 @@ export function LinkAwsAccountForm({ tenants }: { tenants: Tenant[] }) {
                         <Button 
                             className="mt-4" 
                             onClick={handleGenerateTemplate}
-                            disabled={isGenerating || awsAccountId.length !== 12 || !tenantId}
+                            disabled={isGenerating || awsAccountId.length !== 12 || !tenantId || !friendlyName}
                         >
                             {isGenerating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             Generate CloudFormation Template
@@ -253,7 +276,7 @@ export function LinkAwsAccountForm({ tenants }: { tenants: Tenant[] }) {
                     </div>
                 )}
 
-                {/* STEP 3: Setup AWS (CloudFormation) */}
+                {/* STEP 3: Save & Validate */}
                 {step === 3 && (
                     <div className="space-y-4">
                         <div className="bg-green-50 dark:bg-green-950/20 p-4 border border-green-200 dark:border-green-900 rounded-md flex items-start gap-3">
@@ -266,29 +289,9 @@ export function LinkAwsAccountForm({ tenants }: { tenants: Tenant[] }) {
                             </div>
                         </div>
 
-                        <div className="space-y-2">
-                            <Label htmlFor="friendlyName">Friendly Account Name</Label>
-                            <Input 
-                                id="friendlyName" 
-                                placeholder="e.g. Production AWS Account" 
-                                value={friendlyName}
-                                onChange={(e) => setFriendlyName(e.target.value)}
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <Label htmlFor="description">Description (Optional)</Label>
-                            <Textarea 
-                                id="description" 
-                                placeholder="Purpose of this account link..." 
-                                value={description}
-                                onChange={(e) => setDescription(e.target.value)}
-                            />
-                        </div>
-
                         <div className="flex justify-between mt-4">
                             <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
-                            <Button onClick={handleSubmitValidation} disabled={isSubmitting || !friendlyName}>
+                            <Button onClick={handleSubmitValidation} disabled={isSubmitting}>
                                 {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                                 Save and Validate Connection
                             </Button>
