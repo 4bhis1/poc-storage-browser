@@ -188,9 +188,9 @@ export default function LoginPage() {
         }
     };
 
-    const handleBotHandshake = async (e) => {
+        const handleBotHandshake = async (e) => {
         e.preventDefault();
-        if (!botId.trim()) { setError('Please enter your Bot ID'); return; }
+        if (!botId.trim()) { setError('Please enter your Service Account ID'); return; }
         setLoading(true); clearMessages();
         setBotMode('bot_handshake');
         try {
@@ -210,7 +210,7 @@ export default function LoginPage() {
     };
 
     const handleRegenerateKey = async () => {
-        if (!window.confirm('This will generate a new key pair. Your existing Bot ID will no longer work until you re-register the new public key. Continue?')) return;
+        if (!window.confirm('This will generate a new key pair. Your existing Service Account ID will no longer work until you re-register the new public key. Continue?')) return;
         setLoading(true); clearMessages();
         try {
             const result = await window.electronAPI.bot.generateKeyPair();
@@ -390,9 +390,9 @@ export default function LoginPage() {
                         <p className="font-medium">Register in Web Dashboard</p>
                         <ol className="list-decimal list-inside space-y-1 text-xs">
                             <li>Copy the public key below.</li>
-                            <li>Go to the CloudVault web dashboard → Bots → Add Bot.</li>
+                            <li>Go to the CloudVault web dashboard → Service Accounts → Create Account.</li>
                             <li>Paste the public key and set permissions.</li>
-                            <li>Copy the Bot ID you receive and paste it below.</li>
+                            <li>Copy the Service Account ID you receive and paste it below.</li>
                         </ol>
                     </div>
 
@@ -420,7 +420,7 @@ export default function LoginPage() {
                     {/* Bot ID input */}
                     <form onSubmit={handleBotHandshake} className="space-y-3">
                         <div className="space-y-2">
-                            <Label htmlFor="botId">Bot ID (from web dashboard)</Label>
+                            <Label htmlFor="botId">Service Account ID (from web dashboard)</Label>
                             <Input id="botId" type="text" placeholder="e.g. clxyz123abc..."
                                 value={botId} onChange={e => setBotId(e.target.value)} required />
                         </div>
@@ -431,7 +431,7 @@ export default function LoginPage() {
                         <Button type="submit" className="w-full flex items-center justify-center gap-2" disabled={loading || !botId.trim()}>
                             {loading
                                 ? <><Loader2 size={16} className="mr-2 animate-spin" />Connecting…</>
-                                : <><ShieldCheck size={16} />Connect as Bot</>}
+                                : <><ShieldCheck size={16} />Connect as Service Account</>}
                         </Button>
                     </form>
 
@@ -457,7 +457,7 @@ export default function LoginPage() {
     const tabConfig = [
         // { id: 'login', label: 'Password',   icon: <Eye size={14} /> },
         { id: 'sso',   label: 'SSO',        icon: <Globe size={14} /> },
-        { id: 'bot',   label: 'Bot',        icon: <Bot size={14} /> },
+        { id: 'bot',   label: 'Service Account',        icon: <Bot size={14} /> },
     ];
 
     const cardTitleMap = {
@@ -465,7 +465,7 @@ export default function LoginPage() {
                pwMode === 'new_password' ? 'Set New Password' :
                pwMode === 'forgot_password' ? 'Reset Password' : 'Confirm New Password',
         sso:   'Browser SSO Login',
-        bot:   'Bot Authentication',
+        bot:   'Service Account Authentication',
     };
 
     const cardDescMap = {
@@ -474,7 +474,7 @@ export default function LoginPage() {
                pwMode === 'forgot_password' ? 'Enter your email to receive a reset code.' :
                'Enter the reset code and your new password.',
         sso:   'Authenticate via your SSO provider in the browser.',
-        bot:   'Headless machine identity using asymmetric key-pair.',
+        bot:   'Service account identity using asymmetric key-pair.',
     };
 
     return (

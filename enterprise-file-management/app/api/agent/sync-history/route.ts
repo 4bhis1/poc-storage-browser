@@ -1,14 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
 import prisma from '@/lib/prisma';
 import { verifyToken } from '@/lib/token';
+import { verifyBotToken } from '@/lib/bot-auth';
 
 export async function POST(request: NextRequest) {
     try {
         const token = request.headers.get('Authorization')?.split(' ')[1];
         if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-        const payload = await verifyToken(token);
-        if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        // Accept both bot HS256 and Cognito RS256 tokens
+        const botAuth = await verifyBotToken(token);
+        if (!botAuth) {
+            const payload = await verifyToken(token);
+            if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
 
         const body = await request.json();
         const { status, startedAt, completedAt, totalFiles, syncedFiles, failedFiles, activities } = body;
@@ -45,17 +50,17 @@ export async function GET(request: NextRequest) {
         const token = request.headers.get('Authorization')?.split(' ')[1];
         if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-        const payload = await verifyToken(token);
-        if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        // Accept both bot HS256 and Cognito RS256 tokens
+        const botAuth = await verifyBotToken(token);
+        if (!botAuth) {
+            const payload = await verifyToken(token);
+            if (!payload) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+        }
 
         const histories = await prisma.syncHistory.findMany({
-            include: {
-                activities: true,
-            },
-            orderBy: {
-                startedAt: 'desc',
-            },
-            take: 50, // Limit to last 50 entries
+            include: { activities: true },
+            orderBy: { startedAt: 'desc' },
+            take: 50,
         });
 
         return NextResponse.json({ histories });

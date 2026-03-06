@@ -5,6 +5,7 @@ import { verifyToken } from "@/lib/token";
 import { checkPermission } from "@/lib/rbac";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 import { logAudit } from "@/lib/audit";
+import { verifyBotToken, assertBotBucketAccess } from "@/lib/bot-auth";
 
 export async function GET(request: NextRequest) {
   try {
@@ -12,24 +13,37 @@ export async function GET(request: NextRequest) {
     if (!token)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !payload.email)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // ── Bot JWT auth (HS256) ───────────────────────────────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const user = await prisma.user.findUnique({
-      where: { email: payload.email as string },
-      include: {
-        policies: true,
-        teams: {
-          where: { isDeleted: false },
-          include: {
-            team: {
-              include: { policies: true },
-            },
+    let user: any = null;
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: {
+          policies: true,
+          teams: {
+            where: { isDeleted: false },
+            include: { team: { include: { policies: true } } },
           },
         },
-      },
-    });
+      });
+    } else {
+      const payload = await verifyToken(token);
+      if (!payload || typeof payload !== "object" || !payload.email)
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+      user = await prisma.user.findUnique({
+        where: { email: payload.email as string },
+        include: {
+          policies: true,
+          teams: {
+            where: { isDeleted: false },
+            include: { team: { include: { policies: true } } },
+          },
+        },
+      });
+    }
 
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -69,51 +83,57 @@ export async function GET(request: NextRequest) {
 
     let allowedBucketIds: string[] = [];
 
-    if (bucketId) {
+    if (botAuth) {
+      // Bot: scope strictly to permitted buckets
+      if (botAuth.allowedBucketIds.length === 0) {
+        return NextResponse.json({ files: [] });
+      }
+      if (bucketId) {
+        if (!botAuth.allowedBucketIds.includes(bucketId)) {
+          return NextResponse.json(
+            { error: "Forbidden: bot lacks access to this bucket" },
+            { status: 403 },
+          );
+        }
+        allowedBucketIds.push(bucketId);
+      } else {
+        allowedBucketIds = botAuth.allowedBucketIds;
+      }
+    } else if (bucketId) {
       // Verify Specific Bucket Access
-      const bucket = await prisma.bucket.findUnique({
-        where: { id: bucketId },
-      });
+      const bucket = await prisma.bucket.findUnique({ where: { id: bucketId } });
 
       if (!bucket)
-        return NextResponse.json(
-          { error: "Bucket not found" },
-          { status: 404 },
-        );
+        return NextResponse.json({ error: "Bucket not found" }, { status: 404 });
 
-      // Check Permission
       const hasAccess = await checkPermission(user, "READ", {
         tenantId: bucket.tenantId,
         resourceType: "bucket",
         resourceId: bucket.id,
       });
 
-      if (!hasAccess) {
+      if (!hasAccess)
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
+
       allowedBucketIds.push(bucket.id);
     } else {
       // Fetch all buckets in tenant
       const userTenantBuckets = await prisma.bucket.findMany({
         where: { tenantId: user.tenantId! },
       });
-      // Filter by READ permission
       for (const b of userTenantBuckets) {
         const hasAccess = await checkPermission(user, "READ", {
           tenantId: b.tenantId,
           resourceType: "bucket",
           resourceId: b.id,
         });
-        if (hasAccess) {
-          allowedBucketIds.push(b.id);
-        }
+        if (hasAccess) allowedBucketIds.push(b.id);
       }
     }
 
     if (allowedBucketIds.length === 0) {
-      return NextResponse.json({ files: [] }); // No access to any buckets
+      return NextResponse.json({ files: [] });
     }
-
     // List Objects
     const whereClause: any = {
       bucketId: { in: allowedBucketIds },

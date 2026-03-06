@@ -17,18 +17,39 @@ import ExplorerPage from "./pages/ExplorerPage";
 import SyncPage from "./pages/SyncPage";
 import SyncHistoryPage from "./pages/SyncHistoryPage";
 import RecentActivitiesPage from "./pages/RecentActivitiesPage";
+import DoctorPage from "./pages/DoctorPage";
 import LoginPage from "./pages/LoginPage";
+import DoctorGuard from "./components/DoctorGuard";
 import { SystemProvider } from "./contexts/SystemContext";
 
 const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated, loading, isAutoLogin } = useAuth();
+  const [showDoctorGuard, setShowDoctorGuard] = useState(false);
+
+  useEffect(() => {
+    // Activate Doctor Guard only for auto-login scenarios
+    if (isAuthenticated && isAutoLogin && !showDoctorGuard) {
+      setShowDoctorGuard(true);
+    }
+  }, [isAuthenticated, isAutoLogin]);
+
   if (loading)
     return (
       <div className="flex h-screen items-center justify-center">
         Loading...
       </div>
     );
-  return isAuthenticated ? children : <Navigate to="/login" />;
+
+  if (!isAuthenticated) return <Navigate to="/login" />;
+
+  return (
+    <DoctorGuard 
+      shouldActivate={showDoctorGuard}
+      onComplete={() => setShowDoctorGuard(false)}
+    >
+      {children}
+    </DoctorGuard>
+  );
 };
 
 const Layout = () => {
@@ -46,6 +67,7 @@ const Layout = () => {
             <Route path="/sync" element={<SyncPage />} />
             <Route path="/sync/:configId" element={<SyncHistoryPage />} />
             <Route path="/recent" element={<RecentActivitiesPage />} />
+            <Route path="/doctor" element={<DoctorPage />} />
           </Routes>
         </div>
       </div>

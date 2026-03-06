@@ -1,8 +1,8 @@
 /**
  * POST /api/bot/refresh
  *
- * Refresh bot access token using a valid refresh token.
- * If the bot has been revoked (deleted from DB), returns 403 — this is the Kill Switch.
+ * Refresh service account access token using a valid refresh token.
+ * If the service account has been revoked (deleted from DB), returns 403 — this is the Kill Switch.
  *
  * Body: { refreshToken: string }
  * Returns: { accessToken, refreshToken }

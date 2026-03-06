@@ -245,6 +245,9 @@ model BotIdentity {
   isActive         Boolean   @default(true)
   lastUsedAt       DateTime?
   lastHeartbeatAt  DateTime?
+  agentStatus      String?   @default("UNKNOWN")
+  heartbeatLogs    Json?
+  diagnostics      Json?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   user             User      @relation(fields: [userId], references: [id])

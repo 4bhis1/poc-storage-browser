@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Bot, Plus, Copy, Check, KeyRound, ShieldCheck, Clock, ShieldOff,
+  Bot, Plus, Copy, Check, KeyRound, ShieldCheck, Clock, ShieldOff, AlertTriangle,
 } from "lucide-react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import {
@@ -98,7 +98,7 @@ export default function BotsPage() {
   }
 
   async function handleRegisterBot() {
-    if (!botName.trim() || !publicKey.trim()) { setError("Bot name and public key are required."); return; }
+    if (!botName.trim() || !publicKey.trim()) { setError("Account name and public key are required."); return; }
     setError(""); setLoading(true);
     const fd = new FormData();
     fd.set("name", botName.trim());
@@ -122,7 +122,7 @@ export default function BotsPage() {
 
   const columns: ColumnDef<any>[] = [
     {
-      header: "Bot Name",
+      header: "Account Name",
       accessorKey: "name",
       cell: (row) => (
         <div className="flex items-center gap-3">
@@ -170,15 +170,23 @@ export default function BotsPage() {
       accessorKey: "connectionStatus",
       cell: (row) => {
         const isOnline = row.connectionStatus === "online";
+        const hasDiagFailures = row.hasDiagnosticFailures;
         return (
-          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-            isOnline
-              ? "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400"
-              : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
-          }`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
-            {isOnline ? "Online" : "Offline"}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+              isOnline
+                ? "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400"
+                : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
+            }`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+              {isOnline ? "Online" : "Offline"}
+            </span>
+            {hasDiagFailures && !isOnline && (
+              <div title="Diagnostics have failures" className="text-yellow-500">
+                <AlertTriangle className="h-4 w-4" />
+              </div>
+            )}
+          </div>
         );
       },
     },
@@ -206,7 +214,7 @@ export default function BotsPage() {
             </AlertDialogTrigger>
             <AlertDialogContent>
               <AlertDialogHeader>
-                <AlertDialogTitle>Revoke bot access?</AlertDialogTitle>
+                <AlertDialogTitle>Revoke service account?</AlertDialogTitle>
                 <AlertDialogDescription>
                   Permanently deletes <strong>{row.name}</strong> and invalidates all its tokens immediately.
                 </AlertDialogDescription>
@@ -229,22 +237,22 @@ export default function BotsPage() {
     <div className="p-6 h-full flex flex-col">
       <div className="flex justify-between items-start">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Bot Identities</h1>
+          <h1 className="text-3xl font-bold tracking-tight">Service Accounts</h1>
           <p className="text-muted-foreground mt-1">
-            Register machine identities for headless automation. Click a row to manage permissions and view activity.
+            Register service accounts for headless automation. Click a row to manage permissions and view activity.
           </p>
         </div>
 
         <GenericModal
-          title={newBotId ? "Bot Registered" : "Register Bot Identity"}
-          description={newBotId ? "Copy the Bot ID and paste it into the CloudVault desktop agent." : "Configure the bot's identity and bucket access permissions."}
+          title={newBotId ? "Service Account Created" : "Create Service Account"}
+          description={newBotId ? "Copy the Service Account ID and paste it into the CloudVault desktop agent." : "Configure the service account's identity and bucket access permissions."}
           open={isModalOpen}
           onOpenChange={(open) => { setIsModalOpen(open); if (!open) resetForm(); }}
-          trigger={<Button className="gap-2"><Plus className="h-4 w-4" />Add Bot</Button>}
+          trigger={<Button className="gap-2"><Plus className="h-4 w-4" />Create Account</Button>}
           footer={
             newBotId
               ? <Button onClick={() => { setIsModalOpen(false); resetForm(); }}>Done</Button>
-              : <Button disabled={loading} onClick={handleRegisterBot}>{loading ? "Registering…" : "Register Bot"}</Button>
+              : <Button disabled={loading} onClick={handleRegisterBot}>{loading ? "Creating…" : "Create Account"}</Button>
           }
           className="sm:max-w-2xl max-h-[90vh] overflow-y-auto"
         >
@@ -253,12 +261,12 @@ export default function BotsPage() {
               <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/30 p-4">
                 <ShieldCheck className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">Bot registered successfully</p>
-                  <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Copy the Bot ID and paste it into the CloudVault desktop agent → Bot tab → Bot ID field.</p>
+                  <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">Service account created successfully</p>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Copy the Service Account ID and paste it into the CloudVault desktop agent → Service Account tab → Service Account ID field.</p>
                 </div>
               </div>
               <div className="space-y-1.5">
-                <label className="text-sm font-medium">Bot ID</label>
+                <label className="text-sm font-medium">Service Account ID</label>
                 <div className="flex items-center gap-2">
                   <code className="flex-1 rounded-md border bg-muted px-3 py-2 text-sm font-mono break-all">{newBotId}</code>
                   <Button variant="outline" size="icon" onClick={async () => {
@@ -281,7 +289,7 @@ export default function BotsPage() {
                 </ol>
               </div>
               <div>
-                <label className="text-sm font-medium">Bot Name</label>
+                <label className="text-sm font-medium">Account Name</label>
                 <Input value={botName} onChange={e => setBotName(e.target.value)} placeholder="e.g. Production Sync Agent" className="mt-1" autoFocus />
               </div>
               <div>
@@ -294,7 +302,7 @@ export default function BotsPage() {
               </div>
               <div>
                 <label className="text-sm font-medium">Bucket Access Matrix</label>
-                <p className="text-xs text-muted-foreground mt-0.5 mb-2">Select the actions this bot is allowed to perform on each bucket.</p>
+                <p className="text-xs text-muted-foreground mt-0.5 mb-2">Select the actions this service account is allowed to perform on each bucket.</p>
                 {buckets.length === 0 ? (
                   <p className="text-xs text-muted-foreground italic">No buckets found in this tenant.</p>
                 ) : (
@@ -338,8 +346,8 @@ export default function BotsPage() {
         <DataTable
           data={bots}
           columns={columns}
-          searchPlaceholder="Search bots by name or email…"
-          emptyMessage="No bots registered yet. Add one to get started."
+          searchPlaceholder="Search service accounts by name or email…"
+          emptyMessage="No service accounts registered yet. Create one to get started."
           onRowClick={(row) => router.push(`/bots/${row.id}`)}
         />
       </div>

@@ -14,6 +14,7 @@ import { checkPermission } from "@/lib/rbac";
 import { getS3Client } from "@/lib/s3";
 import { logAudit } from "@/lib/audit";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
+import { verifyBotToken, assertBotBucketAccess } from "@/lib/bot-auth";
 
 export async function DELETE(
   request: NextRequest,
@@ -24,20 +25,31 @@ export async function DELETE(
     if (!token)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !payload.email)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // ── Bot JWT auth (HS256) ───────────────────────────────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const user = await prisma.user.findUnique({
-      where: { email: payload.email as string },
-      include: {
-        policies: true,
-        teams: {
-          where: { isDeleted: false },
-          include: { team: { include: { policies: true } } },
+    let user: any = null;
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
         },
-      },
-    });
+      });
+    } else {
+      const payload = await verifyToken(token);
+      if (!payload || typeof payload !== "object" || !payload.email)
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+      user = await prisma.user.findUnique({
+        where: { email: payload.email as string },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
+        },
+      });
+    }
 
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -50,11 +62,7 @@ export async function DELETE(
         resource: "FileObject",
         status: "FAILED",
         ipAddress: clientIp,
-        details: {
-          reason: "IP not whitelisted for team",
-          method: request.method,
-          path: request.nextUrl.pathname,
-        },
+        details: { reason: "IP not whitelisted for team", method: request.method, path: request.nextUrl.pathname },
       });
       return NextResponse.json(
         { error: "Forbidden: IP not whitelisted for your team" },
@@ -72,15 +80,23 @@ export async function DELETE(
     if (!file)
       return NextResponse.json({ error: "File not found" }, { status: 404 });
 
-    // Check Permission
-    const hasAccess = await checkPermission(user, "WRITE", {
-      tenantId: file.bucket.tenantId,
-      resourceType: "bucket",
-      resourceId: file.bucket.id,
-    });
-
-    if (!hasAccess) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // ── Bot: validate bucket access ───────────────────────────────────────
+    if (botAuth) {
+      if (!assertBotBucketAccess(botAuth, file.bucketId, "DELETE") &&
+          !assertBotBucketAccess(botAuth, file.bucketId, "WRITE")) {
+        return NextResponse.json(
+          { error: "Forbidden: bot lacks DELETE access to this bucket" },
+          { status: 403 },
+        );
+      }
+    } else {
+      const hasAccess = await checkPermission(user, "WRITE", {
+        tenantId: file.bucket.tenantId,
+        resourceType: "bucket",
+        resourceId: file.bucket.id,
+      });
+      if (!hasAccess)
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const account = file.bucket.account;
@@ -170,20 +186,31 @@ export async function PATCH(
     if (!token)
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const payload = await verifyToken(token);
-    if (!payload || typeof payload !== "object" || !payload.email)
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    // ── Bot JWT auth (HS256) ───────────────────────────────────────────────
+    const botAuth = await verifyBotToken(token);
 
-    const user = await prisma.user.findUnique({
-      where: { email: payload.email as string },
-      include: {
-        policies: true,
-        teams: {
-          where: { isDeleted: false },
-          include: { team: { include: { policies: true } } },
+    let user: any = null;
+    if (botAuth) {
+      user = await prisma.user.findUnique({
+        where: { email: botAuth.email },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
         },
-      },
-    });
+      });
+    } else {
+      const payload = await verifyToken(token);
+      if (!payload || typeof payload !== "object" || !payload.email)
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+      user = await prisma.user.findUnique({
+        where: { email: payload.email as string },
+        include: {
+          policies: true,
+          teams: { where: { isDeleted: false }, include: { team: { include: { policies: true } } } },
+        },
+      });
+    }
 
     if (!user)
       return NextResponse.json({ error: "User not found" }, { status: 404 });
@@ -196,11 +223,7 @@ export async function PATCH(
         resource: "FileObject",
         status: "FAILED",
         ipAddress: clientIp,
-        details: {
-          reason: "IP not whitelisted for team",
-          method: request.method,
-          path: request.nextUrl.pathname,
-        },
+        details: { reason: "IP not whitelisted for team", method: request.method, path: request.nextUrl.pathname },
       });
       return NextResponse.json(
         { error: "Forbidden: IP not whitelisted for your team" },
@@ -210,7 +233,7 @@ export async function PATCH(
 
     const { id } = await params;
     const body = await request.json();
-    const { name } = body; // New name
+    const { name } = body;
 
     if (!name)
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -223,15 +246,22 @@ export async function PATCH(
     if (!file)
       return NextResponse.json({ error: "File not found" }, { status: 404 });
 
-    // Check Permission
-    const hasAccess = await checkPermission(user, "WRITE", {
-      tenantId: file.bucket.tenantId,
-      resourceType: "bucket",
-      resourceId: file.bucket.id,
-    });
-
-    if (!hasAccess) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    // ── Bot: validate bucket access ───────────────────────────────────────
+    if (botAuth) {
+      if (!assertBotBucketAccess(botAuth, file.bucketId, "WRITE")) {
+        return NextResponse.json(
+          { error: "Forbidden: bot lacks WRITE access to this bucket" },
+          { status: 403 },
+        );
+      }
+    } else {
+      const hasAccess = await checkPermission(user, "WRITE", {
+        tenantId: file.bucket.tenantId,
+        resourceType: "bucket",
+        resourceId: file.bucket.id,
+      });
+      if (!hasAccess)
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     // Simple Rename for Files ONLY for now (MVP)

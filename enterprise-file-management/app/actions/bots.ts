@@ -20,12 +20,31 @@ export async function getBots() {
       permissions: true,
       isActive: true,
       lastUsedAt: true,
+      lastHeartbeatAt: true,
+      diagnostics: true,
       createdAt: true,
       user: { select: { email: true, name: true } },
     },
   })
 
-  return { success: true, data: bots }
+  // Compute connectionStatus: online if heartbeat within last 10 seconds
+  const botsWithStatus = bots.map(bot => {
+    const now = Date.now()
+    const lastBeat = bot.lastHeartbeatAt ? new Date(bot.lastHeartbeatAt).getTime() : 0
+    const isOnline = now - lastBeat < 10 * 1000 // 10 seconds
+    
+    // Check for failed diagnostics
+    const diagnostics = (bot.diagnostics as any[]) ?? []
+    const hasDiagFailures = diagnostics.some((d: any) => d.status === 'fail')
+    
+    return {
+      ...bot,
+      connectionStatus: isOnline ? 'online' : 'offline',
+      hasDiagnosticFailures: hasDiagFailures,
+    }
+  })
+
+  return { success: true, data: botsWithStatus }
 }
 
 export async function getBucketsForTenant() {
@@ -181,5 +200,24 @@ export async function revokeBot(botId: string) {
 
   await prisma.botIdentity.delete({ where: { id: botId } })
   revalidatePath('/bots')
+  return { success: true }
+}
+
+export async function clearBotDiagnostics(botId: string) {
+  const user = await getCurrentUser()
+  if (!user) return { success: false, error: 'Unauthorized' }
+
+  const bot = await prisma.botIdentity.findUnique({ where: { id: botId } })
+  if (!bot) return { success: false, error: 'Not found' }
+
+  if (user.role !== 'PLATFORM_ADMIN' && bot.tenantId !== user.tenantId) {
+    return { success: false, error: 'Forbidden' }
+  }
+
+  await prisma.botIdentity.update({
+    where: { id: botId },
+    data: { diagnostics: null, heartbeatLogs: null },
+  })
+
   return { success: true }
 }

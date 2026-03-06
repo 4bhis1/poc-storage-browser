@@ -94,10 +94,6 @@ class DownloadManager {
             });
         });
     }
-}
-
-module.exports = new DownloadManager();
-
 
     /**
      * Download from S3 by bucket ID (fetches credentials automatically)
@@ -126,3 +122,6 @@ module.exports = new DownloadManager();
 
         return await this.downloadFromS3(s3, name, s3Key, localPath, totalSize);
     }
+}
+
+module.exports = new DownloadManager();

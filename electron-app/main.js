@@ -5,6 +5,7 @@ const chokidar = require('chokidar');
 const si = require('systeminformation');
 const backend = require('./backend');
 const authManager = require('./backend/auth');
+const botAuth = require('./backend/bot-auth');
 const { registerIpcHandlers } = require('./main/ipcHandlers');
 
 // ── Deep-link / Protocol handler ──────────────────────────────────────────
@@ -99,6 +100,12 @@ function createWindow() {
   backend.status.init(mainWindow);
   const syncHistory = require('./backend/syncHistory');
   syncHistory.initUI(mainWindow);
+
+  // Initialize doctor with mainWindow for step-by-step progress events
+  backend.doctor.initUI(mainWindow);
+
+  // Initialize heartbeat with mainWindow for real-time status pushes
+  backend.heartbeat.initUI(mainWindow);
 
   startMonitoring();
   mainWindow.on('closed', () => {
@@ -226,6 +233,43 @@ app.whenReady().then(async () => {
 
   // 5. Register IPC (pass downloadingPaths so SyncManager can be initialized with it)
   registerIpcHandlers(mainWindow, ROOT_PATH, downloadingPaths);
+
+  // 6. Auto-start heartbeat + health reporter if session already exists from prior login
+  const existingSession = authManager.getSession();
+  const botId = botAuth.getBotId();
+  const hasBotIdentity = botAuth.hasKeyPair() && !!botId;
+
+  if (hasBotIdentity) {
+    // Bot identity exists — re-handshake to get fresh tokens before starting heartbeat
+    console.log(`[Main] Bot identity found (${botId}), performing fresh handshake...`);
+    try {
+      const result = await botAuth.performHandshake(botId);
+      authManager.login({
+        accessToken:  result.accessToken,
+        idToken:      result.accessToken,
+        refreshToken: result.refreshToken,
+        username:     result.email,
+        email:        result.email,
+      });
+      const heartbeat = require('./backend/heartbeat');
+      heartbeat.start('bot', () => {
+        if (mainWindow) mainWindow.webContents.send('auth-expired');
+      });
+      backend.healthReporter.start(ROOT_PATH);
+      console.log(`[Main] Bot re-handshake successful — heartbeat + health reporter started (mode=bot)`);
+    } catch (err) {
+      console.error(`[Main] Bot re-handshake failed on startup:`, err.message);
+      // Fall through — renderer will handle login
+    }
+  } else if (existingSession?.idToken) {
+    // SSO session — start heartbeat with existing tokens (will refresh if needed)
+    const heartbeat = require('./backend/heartbeat');
+    heartbeat.start('sso', () => {
+      if (mainWindow) mainWindow.webContents.send('auth-expired');
+    });
+    backend.healthReporter.start(ROOT_PATH);
+    console.log(`[Main] Resumed heartbeat + health reporter (mode=sso) from existing session`);
+  }
 });
 
 app.on('window-all-closed', async () => {

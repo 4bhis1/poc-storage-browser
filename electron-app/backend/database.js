@@ -286,6 +286,54 @@ const initDB = () => {
       WHERE "createdAt" < datetime('now', '-7 days');
     `);
 
+    // ── HeartbeatLog table for Doctor Tab ───────────────────────────────────
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS "HeartbeatLog" (
+        "id" TEXT PRIMARY KEY,
+        "timestamp" TEXT DEFAULT (datetime('now')),
+        "status" TEXT NOT NULL,
+        "latencyMs" INTEGER,
+        "error" TEXT,
+        "serverTime" TEXT
+      );
+    `);
+
+    // ── AgentHeartbeatLog table for local agent health checks ────────────
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS "AgentHeartbeatLog" (
+        "id" TEXT PRIMARY KEY,
+        "timestamp" TEXT DEFAULT (datetime('now')),
+        "status" TEXT NOT NULL,
+        "latencyMs" INTEGER,
+        "error" TEXT
+      );
+    `);
+
+    // Prune agent heartbeat logs older than 24 hours
+    conn.exec(`
+      DELETE FROM "AgentHeartbeatLog"
+      WHERE "timestamp" < datetime('now', '-24 hours');
+    `);
+
+    // Prune heartbeat logs older than 24 hours
+    conn.exec(`
+      DELETE FROM "HeartbeatLog"
+      WHERE "timestamp" < datetime('now', '-24 hours');
+    `);
+
+    // ── DiagnosticsLog table — persists last run results ─────────────────────
+    conn.exec(`
+      CREATE TABLE IF NOT EXISTS "DiagnosticsLog" (
+        "id" TEXT PRIMARY KEY,
+        "name" TEXT NOT NULL,
+        "status" TEXT NOT NULL,
+        "detail" TEXT,
+        "durationMs" INTEGER,
+        "data" TEXT,
+        "ranAt" TEXT DEFAULT (datetime('now'))
+      );
+    `);
+
     conn.exec('COMMIT;');
     console.log('[Database] SQLite initialized successfully');
   } catch (e) {

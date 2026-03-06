@@ -1,9 +1,9 @@
 /**
  * /api/bot
  *
- * GET  — List bots for the current user's tenant
- * POST — Register a new bot identity (ADMIN only)
- * DELETE ?id={botId} — Revoke/delete a bot (the Kill Switch)
+ * GET  — List service accounts (bots) for the current user's tenant
+ * POST — Register a new service account identity (ADMIN only)
+ * DELETE ?id={botId} — Revoke/delete a service account (the Kill Switch)
  */
 
 import { NextRequest, NextResponse } from 'next/server';

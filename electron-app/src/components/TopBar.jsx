@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowUp, ArrowDown, LogOut, HardDrive, Search, Cloud, FolderOpen, File, X, Bot } from 'lucide-react';
+import { ArrowUp, ArrowDown, LogOut, HardDrive, Search, Cloud, FolderOpen, File, X, Bot, User, Shield, Mail, ChevronDown } from 'lucide-react';
 import { useSystem } from '../contexts/SystemContext';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -7,14 +7,16 @@ import { Button } from './ui/button';
 
 const TopBar = () => {
     const { networkStats, diskStats } = useSystem();
-    const { user, logout, isBot, botName } = useAuth();
+    const { user, logout, isBot, botName, isAutoLogin } = useAuth();
     const navigate = useNavigate();
 
     const [searchQuery, setSearchQuery] = useState('');
     const [searchResults, setSearchResults] = useState([]);
     const [isSearching, setIsSearching] = useState(false);
     const [showDropdown, setShowDropdown] = useState(false);
+    const [showProfile, setShowProfile] = useState(false);
     const searchRef = useRef(null);
+    const profileRef = useRef(null);
     const debounceRef = useRef(null);
 
     const formatBytes = (bytes) => {
@@ -74,6 +76,9 @@ const TopBar = () => {
         const handleClickOutside = (e) => {
             if (searchRef.current && !searchRef.current.contains(e.target)) {
                 setShowDropdown(false);
+            }
+            if (profileRef.current && !profileRef.current.contains(e.target)) {
+                setShowProfile(false);
             }
         };
         document.addEventListener('mousedown', handleClickOutside);
@@ -209,28 +214,83 @@ const TopBar = () => {
                 </div>
 
                 {/* User Profile */}
-                <div className="flex items-center gap-1">
-                    <Button variant="ghost" size="icon" onClick={logout} title="Logout" className="h-10 w-10 mr-1 rounded-full text-slate-500 hover:text-slate-800 hover:bg-slate-200/50">
-                        <LogOut className="h-5 w-5" />
-                    </Button>
+                <div className="flex items-center gap-1 relative" ref={profileRef}>
                     {isBot ? (
                         <div
-                            className="h-9 w-9 bg-amber-100 text-amber-700 font-bold rounded-full flex items-center justify-center shadow-sm cursor-default border border-amber-300/60 relative group"
+                            className="h-9 w-9 bg-amber-100 text-amber-700 font-bold rounded-full flex items-center justify-center shadow-sm cursor-pointer border border-amber-300/60"
                             title={botName || 'Bot Agent'}
+                            onClick={() => setShowProfile(v => !v)}
                         >
                             <Bot className="h-4 w-4" />
-                            {/* Tooltip */}
-                            <div className="absolute bottom-full right-0 mb-2 hidden group-hover:flex flex-col items-end z-50">
-                                <div className="bg-slate-900 text-white text-xs rounded-lg px-3 py-2 whitespace-nowrap shadow-lg">
-                                    <p className="font-semibold text-amber-300">Bot Session</p>
-                                    <p className="text-slate-300 mt-0.5">{botName || 'Bot Agent'}</p>
-                                </div>
-                                <div className="w-2 h-2 bg-slate-900 rotate-45 mr-3.5 -mt-1" />
-                            </div>
                         </div>
                     ) : (
-                        <div className="h-9 w-9 bg-purple-100 text-purple-700 font-bold rounded-full flex items-center justify-center text-sm shadow-sm cursor-pointer border border-purple-200/60">
+                        <div 
+                            className="h-9 w-9 bg-purple-100 text-purple-700 font-bold rounded-full flex items-center justify-center text-sm shadow-sm cursor-pointer border border-purple-200/60 hover:ring-2 hover:ring-purple-300/50 transition-all"
+                            onClick={() => setShowProfile(v => !v)}
+                        >
                             {(user?.name || 'A').charAt(0).toUpperCase()}
+                        </div>
+                    )}
+
+                    {/* Profile Popover */}
+                    {showProfile && (
+                        <div className="absolute top-12 right-0 w-72 bg-white rounded-xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-slate-100 z-[9999] overflow-hidden">
+                            {/* Header */}
+                            <div className={`px-4 py-4 ${isBot ? 'bg-amber-50 border-b border-amber-100' : 'bg-purple-50 border-b border-purple-100'}`}>
+                                <div className="flex items-center gap-3">
+                                    {isBot ? (
+                                        <div className="h-10 w-10 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center border border-amber-300/60">
+                                            <Bot className="h-5 w-5" />
+                                        </div>
+                                    ) : (
+                                        <div className="h-10 w-10 bg-purple-100 text-purple-700 font-bold rounded-full flex items-center justify-center text-base border border-purple-200/60">
+                                            {(user?.name || 'A').charAt(0).toUpperCase()}
+                                        </div>
+                                    )}
+                                    <div className="flex-1 min-w-0">
+                                        <p className="text-sm font-semibold text-slate-800 truncate">{user?.name || 'User'}</p>
+                                        <p className="text-xs text-slate-500 truncate">{user?.email || ''}</p>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Info rows */}
+                            <div className="px-4 py-3 space-y-2.5">
+                                <div className="flex items-center gap-2.5 text-sm">
+                                    <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                    <span className="text-slate-600 truncate">{user?.email || '—'}</span>
+                                </div>
+                                <div className="flex items-center gap-2.5 text-sm">
+                                    <Shield className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                    <span className="text-slate-600">
+                                        {isBot ? (
+                                            <span className="inline-flex items-center gap-1">
+                                                <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-xs font-medium">Service Account</span>
+                                                {botName && <span className="text-xs text-slate-400">· {botName}</span>}
+                                            </span>
+                                        ) : (
+                                            <span className="px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 text-xs font-medium">
+                                                {isAutoLogin ? 'Auto-Login' : 'SSO User'}
+                                            </span>
+                                        )}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-2.5 text-sm">
+                                    <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                                    <span className="text-slate-600 text-xs">{user?.username || user?.sub || '—'}</span>
+                                </div>
+                            </div>
+
+                            {/* Logout */}
+                            <div className="border-t border-slate-100 px-4 py-2.5">
+                                <button
+                                    onClick={() => { setShowProfile(false); logout(); }}
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                >
+                                    <LogOut className="h-3.5 w-3.5" />
+                                    Sign out
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
