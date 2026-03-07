@@ -5,12 +5,12 @@
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
-    "bundle": "npm run build && cd dist && zip -r ../function.zip ."
+    "bundle": "npm run build && rm -rf bundle_tmp && mkdir bundle_tmp && cp dist/lambda/file-sync/*.js bundle_tmp/ && mkdir -p bundle_tmp/lib/generated && cp -r dist/lib/generated/prisma bundle_tmp/lib/generated/ && cp -rL node_modules bundle_tmp/ && rm -rf bundle_tmp/node_modules/@prisma/studio-core bundle_tmp/node_modules/@prisma/engines bundle_tmp/node_modules/@prisma/fetch-engine bundle_tmp/node_modules/@prisma/get-platform bundle_tmp/node_modules/@prisma/dev bundle_tmp/node_modules/@prisma/client/runtime/query_compiler_fast* bundle_tmp/node_modules/@prisma/client/runtime/query_compiler_small* bundle_tmp/node_modules/@prisma/client/runtime/wasm-compiler* bundle_tmp/node_modules/prisma bundle_tmp/node_modules/typescript bundle_tmp/node_modules/@electric-sql && cd bundle_tmp && zip -r ../function.zip . && cd .. && rm -rf bundle_tmp"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.0.0",
     "@prisma/adapter-pg": "^7.4.0",
-    "@prisma/client": "^7.4.0",
+    "@prisma/client": "^7.4.2",
     "pg": "^8.18.0"
   },
   "devDependencies": {

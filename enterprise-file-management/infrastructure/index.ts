@@ -264,8 +264,8 @@ const fileSyncDlq = new aws.sqs.Queue("file-sync-dlq", {
 const fileSyncQueue = new aws.sqs.Queue("file-sync-queue", {
   visibilityTimeoutSeconds: 60, // Must be >= Lambda timeout
   messageRetentionSeconds: 86400, // 1 day
-  redrivePolicy: fileSyncDlq.arn.apply(arn =>
-    JSON.stringify({ deadLetterTargetArn: arn, maxReceiveCount: 3 })
+  redrivePolicy: fileSyncDlq.arn.apply((arn) =>
+    JSON.stringify({ deadLetterTargetArn: arn, maxReceiveCount: 3 }),
   ),
   tags: { Purpose: "file-sync" },
 });
@@ -295,7 +295,7 @@ const fileSyncQueuePolicy = new aws.sqs.QueuePolicy("file-sync-queue-policy", {
           Resource: queueArn,
         },
       ],
-    })
+    }),
   ),
 });
 
@@ -320,9 +320,9 @@ const fileSyncEventBusPolicy = new aws.cloudwatch.EventBusPolicy(
             // Condition: { StringEquals: { "aws:PrincipalOrgID": "o-xxxxxxxxxx" } }
           },
         ],
-      })
+      }),
     ),
-  }
+  },
 );
 
 // EventBridge rule on our bus: forward all S3 file events to the SQS queue
@@ -346,13 +346,13 @@ const fileSyncEventTarget = new aws.cloudwatch.EventTarget(
     rule: fileSyncEventRule.name,
     eventBusName: fileSyncEventBus.name,
     arn: fileSyncQueue.arn,
-  }
+  },
 );
 
 // Security group for Lambda — allows outbound to RDS
 const lambdaSg = new aws.ec2.SecurityGroup("file-sync-lambda-sg", {
   vpcId: vpc.vpcId,
-  description: "File sync Lambda — outbound to RDS and internet",
+  description: "File sync Lambda - outbound to RDS and internet",
   egress: [
     {
       protocol: "-1",
@@ -380,7 +380,8 @@ const lambdaRole = new aws.iam.Role("file-sync-lambda-role", {
 // Attach managed policies
 new aws.iam.RolePolicyAttachment("file-sync-lambda-vpc", {
   role: lambdaRole.name,
-  policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
+  policyArn:
+    "arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole",
 });
 
 new aws.iam.RolePolicyAttachment("file-sync-lambda-basic", {
@@ -391,8 +392,9 @@ new aws.iam.RolePolicyAttachment("file-sync-lambda-basic", {
 // Inline policy: SQS consume permissions
 new aws.iam.RolePolicy("file-sync-lambda-sqs-policy", {
   role: lambdaRole.name,
-  policy: pulumi.all([fileSyncQueue.arn, fileSyncDlq.arn]).apply(
-    ([queueArn, dlqArn]) =>
+  policy: pulumi
+    .all([fileSyncQueue.arn, fileSyncDlq.arn])
+    .apply(([queueArn, dlqArn]) =>
       JSON.stringify({
         Version: "2012-10-17",
         Statement: [
@@ -407,17 +409,31 @@ new aws.iam.RolePolicy("file-sync-lambda-sqs-policy", {
             Resource: [queueArn, dlqArn],
           },
         ],
-      })
-  ),
+      }),
+    ),
 });
 
-// Lambda function — expects a pre-built zip at ../lambda/file-sync/function.zip
-// Build with: cd lambda/file-sync && npm run bundle
+// S3 bucket for Lambda deployment artifacts (zip > 70 MB direct-upload limit)
+const lambdaDeployBucket = new aws.s3.BucketV2("file-sync-lambda-deploy", {
+  forceDestroy: true,
+  tags: { Purpose: "lambda-deploy" },
+});
+
+const lambdaZipObject = new aws.s3.BucketObjectv2("file-sync-lambda-zip", {
+  bucket: lambdaDeployBucket.id,
+  key: "file-sync/function.zip",
+  source: new pulumi.asset.FileAsset("../lambda/file-sync/function.zip"),
+});
+
+// Lambda function — code uploaded via S3 to avoid 70 MB direct-upload limit
+// Build zip with: cd lambda/file-sync && npm run bundle
 const fileSyncLambda = new aws.lambda.Function("file-sync-lambda", {
   runtime: aws.lambda.Runtime.NodeJS20dX,
   handler: "index.handler",
   role: lambdaRole.arn,
-  code: new pulumi.asset.FileArchive("../lambda/file-sync/function.zip"),
+  s3Bucket: lambdaDeployBucket.id,
+  s3Key: lambdaZipObject.key,
+  sourceCodeHash: lambdaZipObject.etag,
   timeout: 30, // seconds — well under SQS visibility timeout of 60s
   memorySize: 256,
   vpcConfig: {
@@ -441,7 +457,7 @@ const fileSyncEventSourceMapping = new aws.lambda.EventSourceMapping(
     batchSize: 10,
     maximumBatchingWindowInSeconds: 5,
     functionResponseTypes: ["ReportBatchItemFailures"],
-  }
+  },
 );
 
 export const fileSyncQueueUrl = fileSyncQueue.url;
