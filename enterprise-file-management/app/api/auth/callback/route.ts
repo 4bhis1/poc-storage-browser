@@ -76,7 +76,7 @@ export async function GET(request: NextRequest) {
 
     // Decode token to get user email
     const decoded: any = jwtDecode(idToken);
-    const email = decoded.email;
+    const email = decoded.email?.toLowerCase();
 
     if (!email) {
       return NextResponse.redirect(

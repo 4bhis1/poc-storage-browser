@@ -49,6 +49,7 @@ export async function inviteUserToCognito(
   role: string = "TEAMMATE",
   name?: string,
 ) {
+  email = email.toLowerCase();
   try {
     const userAttributes = [
       { Name: "email", Value: email },
@@ -86,6 +87,7 @@ export async function createUserWithPasswordInCognito(
   name?: string,
   tenantId?: string,
 ) {
+  email = email.toLowerCase();
   try {
     const userAttributes = [
       { Name: "email", Value: email },
@@ -127,6 +129,7 @@ export async function createUserWithPasswordInCognito(
 }
 
 export async function updateUserRoleInCognito(email: string, role: string) {
+  email = email.toLowerCase();
   try {
     const command = new AdminUpdateUserAttributesCommand({
       UserPoolId: USER_POOL_ID,
@@ -142,6 +145,7 @@ export async function updateUserRoleInCognito(email: string, role: string) {
 }
 
 export async function authenticateCognitoUser(email: string, password: string) {
+  email = email.toLowerCase();
   try {
     const command = new InitiateAuthCommand({
       AuthFlow: "USER_PASSWORD_AUTH",
@@ -190,6 +194,7 @@ export async function respondToNewPasswordChallenge(
   newPassword: string,
   session: string,
 ) {
+  email = email.toLowerCase();
   try {
     const command = new RespondToAuthChallengeCommand({
       ChallengeName: "NEW_PASSWORD_REQUIRED",
@@ -211,6 +216,7 @@ export async function respondToNewPasswordChallenge(
 }
 
 export async function forgotPassword(email: string) {
+  email = email.toLowerCase();
   try {
     const command = new ForgotPasswordCommand({
       ClientId: CLIENT_ID,
@@ -231,6 +237,7 @@ export async function confirmForgotPassword(
   confirmationCode: string,
   newPassword: string,
 ) {
+  email = email.toLowerCase();
   try {
     const command = new ConfirmForgotPasswordCommand({
       ClientId: CLIENT_ID,
@@ -252,6 +259,7 @@ export async function toggleUserActiveStatusInCognito(
   email: string,
   isActive: boolean,
 ) {
+  email = email.toLowerCase();
   try {
     const CommandConstructor = isActive
       ? AdminEnableUserCommand
@@ -272,6 +280,7 @@ export async function toggleUserActiveStatusInCognito(
 }
 
 export async function deleteUserInCognito(email: string) {
+  email = email.toLowerCase();
   try {
     const command = new AdminDeleteUserCommand({
       UserPoolId: USER_POOL_ID,

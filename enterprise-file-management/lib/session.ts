@@ -11,7 +11,7 @@ export async function getCurrentUser() {
   const payload = await verifyToken(token);
   if (!payload || (!payload.email && !payload.email_address)) return null;
 
-  const email = (payload.email as string) || "";
+  const email = ((payload.email as string) || "").toLowerCase();
 
   try {
     let user = await prisma.user.findUnique({

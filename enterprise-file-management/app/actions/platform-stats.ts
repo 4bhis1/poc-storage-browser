@@ -48,7 +48,13 @@ export async function getPlatformStats(filters?: PlatformStatsFilters) {
     topTenants,
   ] = await Promise.all([
     prisma.tenant.count({ where: createdAtFilter }),
-    prisma.user.count({ where: { isActive: true, ...createdAtFilter } }),
+    prisma.user.count({
+      where: {
+        isActive: true,
+        role: { not: "PLATFORM_ADMIN" },
+        ...createdAtFilter,
+      },
+    }),
     prisma.bucket.count({ where: createdAtFilter }),
     prisma.botIdentity.count({ where: { isActive: true, ...createdAtFilter } }),
     prisma.fileObject.aggregate({

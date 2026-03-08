@@ -8,14 +8,16 @@ import {
     BreadcrumbList,
     BreadcrumbPage,
 } from "@/components/ui/breadcrumb"
-import { getAccounts } from "@/app/actions/accounts"
+import { getAwsAccounts } from "@/app/actions/aws-accounts"
 import { AccountList } from "@/components/accounts/account-list"
 
 export default async function AccountsPage() {
-    const { data: rawAccounts = [] } = await getAccounts()
+    const { data: rawAccounts = [] } = await getAwsAccounts()
 
     const accounts = rawAccounts?.map((a: any) => ({
         ...a,
+        name: a.friendlyName,
+        isActive: a.status === "CONNECTED",
         createdAt: a.createdAt.toISOString(),
     }))
 

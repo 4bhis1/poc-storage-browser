@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     let authResult;
     let initiateAuthResponse;
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = password.trim();
 
     try {

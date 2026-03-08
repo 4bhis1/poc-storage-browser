@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
 
     let authResponse;
 
-    const cleanEmail = email.trim();
+    const cleanEmail = email.trim().toLowerCase();
     const cleanPassword = newPassword.trim();
     const cleanSession = session.trim();
 

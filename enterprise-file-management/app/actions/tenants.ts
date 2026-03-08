@@ -29,7 +29,7 @@ export async function getTenants() {
     // We explicitly type 'tenant' as any for now to avoid deep type matching issues with the include
     const tenantsWithStorage = await Promise.all(
       tenants.map(async (tenant: any) => {
-        const accounts = await prisma.account.findMany({
+        const accounts = await prisma.awsAccount.findMany({
           where: { tenantId: tenant.id },
           select: {
             buckets: {
@@ -68,7 +68,7 @@ export async function getTenants() {
 export async function createTenant(formData: FormData) {
   const name = formData.get("name") as string;
   const adminName = formData.get("adminName") as string;
-  const adminEmail = formData.get("adminEmail") as string;
+  const adminEmail = (formData.get("adminEmail") as string).toLowerCase();
   const adminPassword = formData.get("adminPassword") as string;
 
   if (!name || !adminName || !adminEmail || !adminPassword) {

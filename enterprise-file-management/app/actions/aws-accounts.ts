@@ -19,6 +19,11 @@ export async function getAwsAccounts() {
             name: true,
           },
         },
+        _count: {
+          select: {
+            buckets: true,
+          },
+        },
       },
       orderBy: {
         createdAt: "desc",

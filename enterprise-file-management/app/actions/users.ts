@@ -52,7 +52,7 @@ export async function getUsers() {
 
 export async function inviteUser(formData: FormData) {
   const name = formData.get("name") as string;
-  const email = formData.get("email") as string;
+  const email = (formData.get("email") as string).toLowerCase();
   const role = formData.get("role") as Role;
   const tenantId = formData.get("tenantId") as string;
 
@@ -65,7 +65,6 @@ export async function inviteUser(formData: FormData) {
     if (!currentUser) {
       return { success: false, error: "Unauthorized" };
     }
-
 
     if (currentUser.role !== "PLATFORM_ADMIN") {
       if (
@@ -155,7 +154,7 @@ export async function updateUserRole(userId: string, newRole: Role) {
 
 export async function createUserWithPassword(formData: FormData) {
   const name = formData.get("name") as string;
-  const email = formData.get("email") as string;
+  const email = (formData.get("email") as string).toLowerCase();
   const role = formData.get("role") as Role;
   const tenantId = formData.get("tenantId") as string;
   const password = formData.get("password") as string;
