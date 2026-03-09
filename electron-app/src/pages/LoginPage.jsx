@@ -409,7 +409,7 @@ export default function LoginPage() {
                             <button
                                 type="button"
                                 onClick={handleCopyPublicKey}
-                                className="absolute top-2 right-2 p-1.5 rounded bg-white border border-slate-200 text-slate-500 hover:text-slate-800 transition-colors"
+                                className="absolute top-2 right-2 p-1.5 rounded bg-white border border-slate-200 text-slate-500 hover:text-slate-800 transition-colors cursor-pointer"
                                 title="Copy public key"
                             >
                                 {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}

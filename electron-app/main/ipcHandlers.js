@@ -418,8 +418,9 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
                 if (mainWindow) mainWindow.webContents.send('auth-expired');
             });
 
-            // Start health reporter
+            // Start health reporter and immediately push machine info on first login
             backend.healthReporter.start(rootPath);
+            backend.healthReporter.triggerReport();
 
             return { success: true, accessToken: result.accessToken, email: result.email };
         } catch (err) {
@@ -452,8 +453,9 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
                 if (mainWindow) mainWindow.webContents.send('auth-expired');
             });
 
-            // Start health reporter
+            // Start health reporter and immediately push machine info on login
             backend.healthReporter.start(rootPath);
+            backend.healthReporter.triggerReport();
 
             console.log('[IPC] Auto-login successful for bot:', botId);
             return { 

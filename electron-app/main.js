@@ -1,5 +1,7 @@
-require('dotenv').config();
 const { app, BrowserWindow } = require('electron');
+// Load .env only in dev — never in packaged production builds
+const isDev = !app.isPackaged;
+if (isDev) require('dotenv').config();
 const path = require('path');
 const chokidar = require('chokidar');
 const si = require('systeminformation');
@@ -12,6 +14,21 @@ const { registerIpcHandlers } = require('./main/ipcHandlers');
 // Register cloudvault:// as the app's custom protocol (must be done before
 // app.whenReady and before any second-instance event fires).
 app.setAsDefaultProtocolClient('cloudvault');
+
+// ── Single instance lock ──────────────────────────────────────────────────
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+  process.exit(0);
+}
+
+// ── Global error handlers ─────────────────────────────────────────────────
+process.on('uncaughtException', (error) => {
+  console.error('[Main] Uncaught Exception:', error);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Main] Unhandled Rejection:', reason);
+});
 
 /**
  * Parse a cloudvault://auth?token=<idToken>&refresh=<refreshToken> URL,
@@ -60,7 +77,7 @@ app.on('second-instance', (_event, argv) => {
   }
 });
 
-const ROOT_PATH = process.env.ROOT_PATH || path.join(app.getPath('home'), 'FMS');
+const ROOT_PATH = process.env.ROOT_PATH || path.join(app.getPath('documents'), 'CloudVault');
 
 let mainWindow;
 let watcher;
@@ -91,7 +108,12 @@ function createWindow() {
     show: false,
   });
 
-  mainWindow.loadURL('http://localhost:5173');
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  } else {
+    mainWindow.loadFile(path.join(__dirname, 'dist', 'index.html'));
+  }
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
   });
@@ -256,6 +278,7 @@ app.whenReady().then(async () => {
         if (mainWindow) mainWindow.webContents.send('auth-expired');
       });
       backend.healthReporter.start(ROOT_PATH);
+      backend.healthReporter.triggerReport();
       console.log(`[Main] Bot re-handshake successful — heartbeat + health reporter started (mode=bot)`);
     } catch (err) {
       console.error(`[Main] Bot re-handshake failed on startup:`, err.message);
@@ -270,6 +293,11 @@ app.whenReady().then(async () => {
     backend.healthReporter.start(ROOT_PATH);
     console.log(`[Main] Resumed heartbeat + health reporter (mode=sso) from existing session`);
   }
+});
+
+// macOS: re-create window when dock icon is clicked and no windows open
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) createWindow();
 });
 
 app.on('window-all-closed', async () => {

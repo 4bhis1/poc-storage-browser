@@ -6,8 +6,16 @@ const path = require('path');
 const crypto = require('crypto');
 const syncHistory = require('./syncHistory');
 
-const ROOT_PATH = process.env.ROOT_PATH || "/home/abhishek/FMS";
-const API_URL = process.env.API_URL || "http://localhost:3000/api";
+let ROOT_PATH;
+try {
+  const { app } = require('electron');
+  const { getRootPath } = require('./config');
+  ROOT_PATH = getRootPath();
+} catch {
+  ROOT_PATH = require('./config').getRootPath();
+}
+const { ENTERPRISE_URL } = require('./config');
+const API_URL = ENTERPRISE_URL + '/api';
 const SYNC_INTERVAL = 1000 * 60 * 5; // 5 minutes
 
 class SyncManager {
@@ -90,9 +98,14 @@ class SyncManager {
 
     async syncAll() {
         // Build incremental sync param — pass lastSyncedAt if we have one
-        const lastSyncRow = await database.query(
-            `SELECT value FROM "KVStore" WHERE key = 'lastFullSyncAt' LIMIT 1`
-        ).catch(() => ({ rows: [] }));
+        let lastSyncRow = { rows: [] };
+        try {
+            lastSyncRow = await database.query(
+                `SELECT value FROM "KVStore" WHERE key = 'lastFullSyncAt' LIMIT 1`
+            );
+        } catch (err) {
+            console.warn('[SyncManager] Could not fetch lastFullSyncAt:', err.message);
+        }
         const lastSyncAt = lastSyncRow.rows[0]?.value || null;
 
         const params = lastSyncAt ? `?updatedSince=${encodeURIComponent(lastSyncAt)}` : '';
@@ -507,15 +520,5 @@ class SyncManager {
 }
 
 module.exports = new SyncManager();
-
-        return new Promise((resolve, reject) => {
-            const hash = crypto.createHash('md5');
-            const stream = fs.createReadStream(filePath);
-            stream.on('data', data => hash.update(data));
-            stream.on('end', () => resolve(hash.digest('hex')));
-            stream.on('error', reject);
-        });
-    }
-}
 
 module.exports = new SyncManager();

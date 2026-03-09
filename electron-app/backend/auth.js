@@ -6,26 +6,74 @@
 
 const Store = require('electron-store');
 const cognito = require('./cognito');
+const { getEncryptionKey } = require('./config');
 
-const store = new Store({
-  name: 'cloudvault-auth',
-  encryptionKey: process.env.ENCRYPTION_KEY || 'cloudvault-default-key',
-  schema: {
-    accessToken:  { type: 'string', default: '' },
-    idToken:      { type: 'string', default: '' },
-    refreshToken: { type: 'string', default: '' },
-    username:     { type: 'string', default: '' },
-    email:        { type: 'string', default: '' },
-  },
-});
+let store = null;
+
+function getStore() {
+  if (store) return store;
+  
+  try {
+    store = new Store({
+      name: 'cloudvault-auth',
+      encryptionKey: getEncryptionKey(),
+      schema: {
+        accessToken:  { type: 'string', default: '' },
+        idToken:      { type: 'string', default: '' },
+        refreshToken: { type: 'string', default: '' },
+        username:     { type: 'string', default: '' },
+        email:        { type: 'string', default: '' },
+      },
+    });
+  } catch (err) {
+    console.warn('[AuthManager] Store initialization failed, attempting recovery:', err.message);
+    
+    // Clear corrupted store file and retry
+    try {
+      const path = require('path');
+      const fs = require('fs');
+      const app = require('electron').app;
+      const storeFile = path.join(app.getPath('userData'), 'cloudvault-auth.json');
+      
+      if (fs.existsSync(storeFile)) {
+        fs.unlinkSync(storeFile);
+        console.log('[AuthManager] Removed corrupted store file, retrying...');
+      }
+      
+      // Retry store initialization
+      store = new Store({
+        name: 'cloudvault-auth',
+        encryptionKey: getEncryptionKey(),
+        schema: {
+          accessToken:  { type: 'string', default: '' },
+          idToken:      { type: 'string', default: '' },
+          refreshToken: { type: 'string', default: '' },
+          username:     { type: 'string', default: '' },
+          email:        { type: 'string', default: '' },
+        },
+      });
+      console.log('[AuthManager] Store recovered successfully');
+    } catch (retryErr) {
+      console.error('[AuthManager] Store recovery failed:', retryErr.message);
+      throw retryErr;
+    }
+  }
+  
+  return store;
+}
 
 class AuthManager {
   constructor() {
     this._refreshTimer = null;
     // Kick off proactive refresh if we already have tokens from a prior session
-    const session = this.getSession();
-    if (session && session.idToken) {
-      this._scheduleRefresh(session.idToken);
+    try {
+      const session = this.getSession();
+      if (session && session.idToken) {
+        this._scheduleRefresh(session.idToken);
+      }
+    } catch (err) {
+      console.warn('[AuthManager] Could not load session on startup:', err.message);
+      // Non-fatal — user will need to log in
     }
   }
 
@@ -36,12 +84,13 @@ class AuthManager {
    * @param {{ accessToken, idToken, refreshToken, username, email? }} result
    */
   login(result) {
-    store.set('accessToken',  result.accessToken  || '');
-    store.set('idToken',      result.idToken      || '');
-    store.set('refreshToken', result.refreshToken || '');
-    store.set('username',     result.username     || result.email || '');
-    store.set('email',        result.email        || result.username || '');
-    console.log('[AuthManager] Tokens saved to store for:', store.get('email'));
+    const s = getStore();
+    s.set('accessToken',  result.accessToken  || '');
+    s.set('idToken',      result.idToken      || '');
+    s.set('refreshToken', result.refreshToken || '');
+    s.set('username',     result.username     || result.email || '');
+    s.set('email',        result.email        || result.username || '');
+    console.log('[AuthManager] Tokens saved to store for:', s.get('email'));
     this._scheduleRefresh(result.idToken);
   }
   /**
@@ -49,15 +98,16 @@ class AuthManager {
    * @returns {{ success, accessToken, idToken }}
    */
   async refreshTokens() {
-    const refreshToken = store.get('refreshToken');
-    const username     = store.get('username');
+    const s = getStore();
+    const refreshToken = s.get('refreshToken');
+    const username     = s.get('username');
     if (!refreshToken || !username) {
       return { success: false, error: 'No refresh token stored' };
     }
     try {
       const result = await cognito.refreshCognitoToken(refreshToken, username);
-      store.set('accessToken', result.accessToken);
-      store.set('idToken',     result.idToken);
+      s.set('accessToken', result.accessToken);
+      s.set('idToken',     result.idToken);
       console.log('[AuthManager] Tokens refreshed silently');
       this._scheduleRefresh(result.idToken);
       return { success: true, accessToken: result.accessToken, idToken: result.idToken };
@@ -70,11 +120,12 @@ class AuthManager {
   /** Clear all stored tokens and cancel the refresh timer. */
   logout() {
     this._cancelRefresh();
-    store.set('accessToken',  '');
-    store.set('idToken',      '');
-    store.set('refreshToken', '');
-    store.set('username',     '');
-    store.set('email',        '');
+    const s = getStore();
+    s.set('accessToken',  '');
+    s.set('idToken',      '');
+    s.set('refreshToken', '');
+    s.set('username',     '');
+    s.set('email',        '');
     console.log('[AuthManager] Logged out — store cleared');
     
     // Clear AWS credential cache
@@ -87,29 +138,47 @@ class AuthManager {
    * @returns {{ accessToken, idToken, refreshToken, username, email } | null}
    */
   getSession() {
-    const accessToken = store.get('accessToken');
-    if (!accessToken) return null;
-    return {
-      accessToken,
-      idToken:      store.get('idToken'),
-      refreshToken: store.get('refreshToken'),
-      username:     store.get('username'),
-      email:        store.get('email'),
-    };
+    try {
+      const s = getStore();
+      const accessToken = s.get('accessToken');
+      if (!accessToken) return null;
+      return {
+        accessToken,
+        idToken:      s.get('idToken'),
+        refreshToken: s.get('refreshToken'),
+        username:     s.get('username'),
+        email:        s.get('email'),
+      };
+    } catch (err) {
+      console.warn('[AuthManager] getSession error:', err.message);
+      return null;
+    }
   }
 
   /** Get the current token (alias for backward compatibility) */
   getToken() {
-    return store.get('idToken') || null;
+    try {
+      const s = getStore();
+      return s.get('idToken') || null;
+    } catch (err) {
+      console.warn('[AuthManager] getToken error:', err.message);
+      return null;
+    }
   }
 
   /** Decode the IdToken JWT and check if it is expired. */
   isTokenExpired() {
-    const idToken = store.get('idToken');
-    if (!idToken) return true;
-    const exp = this._decodeExp(idToken);
-    if (!exp) return true;
-    return Date.now() >= exp * 1000;
+    try {
+      const s = getStore();
+      const idToken = s.get('idToken');
+      if (!idToken) return true;
+      const exp = this._decodeExp(idToken);
+      if (!exp) return true;
+      return Date.now() >= exp * 1000;
+    } catch (err) {
+      console.warn('[AuthManager] isTokenExpired error:', err.message);
+      return true;
+    }
   }
 
   // ─── Internal helpers ──────────────────────────────────────────────────────

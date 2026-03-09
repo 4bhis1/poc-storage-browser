@@ -8,7 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Shield, Activity, Bot, ShieldOff, CheckCircle2, XCircle, RefreshCw,
   ArrowUpFromLine, ArrowDownToLine, Trash2, Stethoscope, Wifi, WifiOff,
-  AlertTriangle, Clock,
+  AlertTriangle, Clock, Settings, Copy, Check, KeyRound, Monitor, Cpu, MemoryStick,
 } from 'lucide-react';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -16,7 +16,7 @@ import {
   AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { useAuth } from '@/components/providers/AuthProvider';
-import { getBots, getBucketsForTenant, updateBotPermissions, revokeBot, getBotActivity } from '@/app/actions/bots';
+import { getBots, getBucketsForTenant, updateBotPermissions, revokeBot, getBotActivity, configureBotKey } from '@/app/actions/bots';
 
 const ACTIONS = ['READ', 'WRITE', 'DELETE', 'SHARE', 'DOWNLOAD'];
 
@@ -43,7 +43,6 @@ const ACTION_META: Record<string, { icon: React.ReactNode; color: string }> = {
 // ── Heartbeat Ribbon ─────────────────────────────────────────────────────────
 function HeartbeatRibbon({ logs }: { logs: any[] }) {
   const now = Date.now();
-
   const buckets = Array.from({ length: 60 }, (_, i) => {
     const start = now - (60 - i) * 60 * 1000;
     const end   = start + 60 * 1000;
@@ -78,12 +77,12 @@ function HeartbeatRibbon({ logs }: { logs: any[] }) {
     const s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
     if (s < 60)   return `${s}s ago`;
     if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-    return new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return new Date(ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
   return (
     <div className="space-y-3">
-      {/* Ribbon */}
       <div className="flex gap-0.5 h-10">
         {buckets.map((b, i) => (
           <div
@@ -93,7 +92,6 @@ function HeartbeatRibbon({ logs }: { logs: any[] }) {
           />
         ))}
       </div>
-      {/* Metrics row */}
       <div className="grid grid-cols-3 gap-4">
         <div>
           <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Avg Latency</p>
@@ -108,7 +106,6 @@ function HeartbeatRibbon({ logs }: { logs: any[] }) {
           <p className="text-xl font-black mt-0.5 text-sm">{ago(lastSuccess)}</p>
         </div>
       </div>
-      {/* Legend */}
       <div className="flex gap-4 text-xs text-muted-foreground pt-1 border-t">
         {[
           { cls: 'bg-emerald-500', label: 'Fast (<200ms)' },
@@ -126,7 +123,6 @@ function HeartbeatRibbon({ logs }: { logs: any[] }) {
   );
 }
 
-// ── Diagnostic Card ──────────────────────────────────────────────────────────
 const DIAG_STATUS: Record<string, { icon: React.ReactNode; border: string; bg: string }> = {
   pass: { icon: <CheckCircle2 className="h-5 w-5 text-emerald-600" />, border: 'border-emerald-200', bg: 'bg-emerald-50 dark:bg-emerald-950/20' },
   warn: { icon: <AlertTriangle className="h-5 w-5 text-yellow-600" />, border: 'border-yellow-200',  bg: 'bg-yellow-50 dark:bg-yellow-950/20' },
@@ -155,7 +151,6 @@ function DiagCard({ d }: { d: any }) {
   );
 }
 
-// ── Main Page ────────────────────────────────────────────────────────────────
 export default function BotDetailPage() {
   const { user } = useAuth();
   const params   = useParams();
@@ -166,15 +161,23 @@ export default function BotDetailPage() {
     if (user && user.role !== 'PLATFORM_ADMIN' && user.role !== 'TENANT_ADMIN') router.replace('/');
   }, [user, router]);
 
-  const [bot, setBot]       = React.useState<any>(null);
+  const [bot, setBot] = React.useState<any>(null);
   const [buckets, setBuckets] = React.useState<any[]>([]);
   const [matrix, setMatrix] = React.useState<Record<string, Record<string, boolean>>>({});
-  const [activity, setActivity]         = React.useState<any[]>([]);
+  const [activity, setActivity] = React.useState<any[]>([]);
   const [activityLoading, setActivityLoading] = React.useState(false);
-  const [healthData, setHealthData]     = React.useState<any>(null);
+  const [healthData, setHealthData] = React.useState<any>(null);
   const [healthLoading, setHealthLoading] = React.useState(false);
-  const [saving, setSaving]   = React.useState(false);
+  const [saving, setSaving] = React.useState(false);
   const [saveMsg, setSaveMsg] = React.useState('');
+
+  // Agent Config state
+  const [publicKeyInput, setPublicKeyInput] = React.useState('');
+  const [keyConfigLoading, setKeyConfigLoading] = React.useState(false);
+  const [keyConfigMsg, setKeyConfigMsg] = React.useState('');
+  const [copiedAgentId, setCopiedAgentId] = React.useState(false);
+  const [showFullKey, setShowFullKey] = React.useState(false);
+  const pollRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
 
   React.useEffect(() => {
     getBots().then(r => {
@@ -185,6 +188,34 @@ export default function BotDetailPage() {
     });
     getBucketsForTenant().then(r => { if (r.success) setBuckets(r.data ?? []); });
   }, [botId]);
+
+  // Auto-advance to step 3 when agent connects: poll health every 10s while on step 2
+  React.useEffect(() => {
+    const isKeyConfigured = bot?.publicKey && bot.publicKey !== '';
+    const hasConnected = !!bot?.lastHeartbeatAt;
+    if (!isKeyConfigured || hasConnected) return; // only poll on step 2
+
+    function poll() {
+      const token = typeof window !== 'undefined' ? localStorage.getItem('accessToken') : '';
+      fetch(`/api/agent/health?botId=${botId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => r.json())
+        .then(data => {
+          if (data?.bot?.lastHeartbeatAt) {
+            // Agent connected — load full health data and advance
+            setHealthData(data);
+            setBot((prev: any) => ({ ...prev, lastHeartbeatAt: data.bot.lastHeartbeatAt, machineInfo: data.bot.machineInfo ?? prev.machineInfo }));
+            if (pollRef.current) clearInterval(pollRef.current);
+          }
+        })
+        .catch(() => {});
+    }
+
+    poll(); // immediate first check
+    pollRef.current = setInterval(poll, 10_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [bot?.publicKey, bot?.lastHeartbeatAt, botId]);
 
   function loadActivity() {
     setActivityLoading(true);
@@ -203,6 +234,23 @@ export default function BotDetailPage() {
       .then(r => r.json())
       .then(data => { setHealthData(data); setHealthLoading(false); })
       .catch(() => setHealthLoading(false));
+  }
+
+  async function handleSaveKey() {
+    if (!publicKeyInput.trim()) {
+      setKeyConfigMsg('Public key is required');
+      return;
+    }
+    setKeyConfigLoading(true);
+    setKeyConfigMsg('');
+    const result = await configureBotKey(botId, publicKeyInput);
+    setKeyConfigLoading(false);
+    if (result.success) {
+      setKeyConfigMsg('Public key saved successfully');
+      setBot((prev: any) => ({ ...prev, publicKey: publicKeyInput.trim() }));
+    } else {
+      setKeyConfigMsg(result.error ?? 'Failed to save key');
+    }
   }
 
   function handleCheckbox(bucketId: string, action: string, checked: boolean) {
@@ -237,12 +285,21 @@ export default function BotDetailPage() {
   const diags = (healthData?.diagnostics as any[]) ?? [];
   const botStatus = healthData?.bot?.status ?? 'UNKNOWN';
   const isOnline  = botStatus === 'ONLINE';
+  const isKeyConfigured = bot.publicKey && bot.publicKey !== '';
+  const hasConnected = !!bot.lastHeartbeatAt;
+  
+  // Determine wizard step based on state
+  const getWizardStep = () => {
+    if (!isKeyConfigured) return 1; // Need to paste key
+    if (!hasConnected) return 2;    // Key saved, waiting for first connection
+    return 3;                        // Connected, show machine info
+  };
+  const wizardStep = getWizardStep();
 
   return (
     <div className="space-y-6 px-4 md:px-6 lg:px-8 py-6">
-      {/* Header */}
       <div>
-        <Button variant="link" className="px-0 text-muted-foreground mb-2" onClick={() => router.push('/bots')}>
+        <Button variant="link" className="px-0 text-muted-foreground mb-2 cursor-pointer" onClick={() => router.push('/bots')}>
           ← Back to Service Accounts
         </Button>
         <div className="flex items-start justify-between">
@@ -270,7 +327,6 @@ export default function BotDetailPage() {
                   <AlertDialogTitle>Revoke service account?</AlertDialogTitle>
                   <AlertDialogDescription>
                     Permanently deletes <strong>{bot.name}</strong> and invalidates all its tokens immediately.
-                    The service account's next heartbeat will fail — this is the Kill Switch.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>
@@ -285,13 +341,218 @@ export default function BotDetailPage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <Tabs defaultValue="permissions" className="w-full mt-6">
         <TabsList className="mb-4">
-          <TabsTrigger value="permissions" className="gap-2"><Shield className="h-4 w-4" /> Permissions</TabsTrigger>
-          <TabsTrigger value="activity" className="gap-2" onClick={loadActivity}><Activity className="h-4 w-4" /> Activity</TabsTrigger>
-          <TabsTrigger value="health" className="gap-2" onClick={loadHealth}><Stethoscope className="h-4 w-4" /> Health & Metrics</TabsTrigger>
+          <TabsTrigger value="permissions" className="gap-2 cursor-pointer"><Shield className="h-4 w-4" /> Permissions</TabsTrigger>
+          <TabsTrigger value="activity" className="gap-2 cursor-pointer" onClick={loadActivity}><Activity className="h-4 w-4" /> Activity</TabsTrigger>
+          <TabsTrigger value="health" className="gap-2 cursor-pointer" onClick={loadHealth}><Stethoscope className="h-4 w-4" /> Health & Metrics</TabsTrigger>
+          <TabsTrigger value="config" className="gap-2 cursor-pointer"><Settings className="h-4 w-4" /> Agent Config</TabsTrigger>
         </TabsList>
+
+        {/* ── Agent Config ── */}
+        <TabsContent value="config" className="space-y-4">
+          {/* Progress Steps */}
+          <div className="flex items-center justify-center gap-2 mb-6">
+            {[1, 2, 3].map((step) => (
+              <React.Fragment key={step}>
+                <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-semibold transition-colors ${
+                  wizardStep >= step 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'bg-muted text-muted-foreground'
+                }`}>
+                  {wizardStep > step ? <Check className="h-4 w-4" /> : step}
+                </div>
+                {step < 3 && (
+                  <div className={`w-16 h-1 rounded ${wizardStep > step ? 'bg-primary' : 'bg-muted'}`} />
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+
+          {/* Step 1: Paste Public Key */}
+          {wizardStep === 1 && (
+            <div className="bg-white dark:bg-slate-950 border rounded-lg p-6 space-y-6">
+              <div className="text-center mb-4">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-950 mb-3">
+                  <KeyRound className="h-6 w-6 text-blue-600" />
+                </div>
+                <h2 className="text-xl font-bold">Step 1: Configure Public Key</h2>
+                <p className="text-sm text-muted-foreground mt-1">Generate a key pair in the desktop agent and paste the public key here.</p>
+              </div>
+
+              <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 p-4">
+                <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">How to get the public key:</p>
+                <ol className="list-decimal list-inside space-y-1.5 text-sm text-blue-700 dark:text-blue-400">
+                  <li>Open the CloudVault desktop agent</li>
+                  <li>Navigate to Login → Bot tab</li>
+                  <li>Click "Generate Key Pair"</li>
+                  <li>Copy the public key displayed</li>
+                </ol>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium">Public Key (PEM)</label>
+                <textarea
+                  className="mt-2 w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+                  rows={8}
+                  placeholder="-----BEGIN PUBLIC KEY-----&#10;...&#10;-----END PUBLIC KEY-----"
+                  value={publicKeyInput}
+                  onChange={e => setPublicKeyInput(e.target.value)}
+                />
+              </div>
+
+              {keyConfigMsg && (
+                <p className={`text-sm font-medium ${keyConfigMsg.includes('success') ? 'text-emerald-600' : 'text-red-500'}`}>
+                  {keyConfigMsg}
+                </p>
+              )}
+
+              <Button onClick={handleSaveKey} disabled={keyConfigLoading || !publicKeyInput.trim()} className="w-full" size="lg">
+                {keyConfigLoading ? 'Saving...' : 'Next →'}
+              </Button>
+            </div>
+          )}
+
+          {/* Step 2: Show Agent ID */}
+          {wizardStep === 2 && (
+            <div className="bg-white dark:bg-slate-950 border rounded-lg p-6 space-y-6">
+              <div className="text-center mb-4">
+                <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-950 mb-3">
+                  <Bot className="h-6 w-6 text-emerald-600" />
+                </div>
+                <h2 className="text-xl font-bold">Step 2: Connect Agent</h2>
+                <p className="text-sm text-muted-foreground mt-1">Copy the Agent ID below and paste it into the desktop agent.</p>
+              </div>
+
+              <div className="bg-gradient-to-br from-emerald-50 to-teal-50 dark:from-emerald-950/30 dark:to-teal-950/30 border-2 border-emerald-200 dark:border-emerald-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-5 w-5 text-emerald-600" />
+                    <h3 className="text-lg font-bold text-emerald-900 dark:text-emerald-100">Agent ID</h3>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5"
+                    onClick={async () => {
+                      await navigator.clipboard.writeText(botId);
+                      setCopiedAgentId(true);
+                      setTimeout(() => setCopiedAgentId(false), 2000);
+                    }}
+                  >
+                    {copiedAgentId ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                    Copy
+                  </Button>
+                </div>
+                <code className="block rounded-md bg-white/50 dark:bg-slate-900/50 px-4 py-3 text-sm font-mono break-all border border-emerald-100 dark:border-emerald-900">
+                  {botId}
+                </code>
+              </div>
+
+              <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/30 p-4">
+                <p className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-2">Next steps in the desktop agent:</p>
+                <ol className="list-decimal list-inside space-y-1.5 text-sm text-amber-700 dark:text-amber-400">
+                  <li>Go to Login → Bot tab</li>
+                  <li>Paste the Agent ID above into the "Service Account ID" field</li>
+                  <li>Click "Connect" to complete the handshake</li>
+                </ol>
+              </div>
+
+              <div className="flex items-center justify-center gap-3 p-4 rounded-lg bg-slate-50 dark:bg-slate-900">
+                <div className="animate-pulse h-3 w-3 rounded-full bg-amber-500" />
+                <span className="text-sm text-muted-foreground">Waiting for agent to connect...</span>
+                <Button variant="ghost" size="sm" onClick={async () => {
+                  const r = await getBots();
+                  const found = (r.data ?? []).find((b: any) => b.id === botId);
+                  if (found) setBot(found);
+                }}>
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Connected - Show Agent ID + System Info */}
+          {wizardStep === 3 && (
+            <div className="space-y-6">
+              {/* Agent ID */}
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 dark:from-indigo-950/30 dark:to-purple-950/30 border-2 border-indigo-200 dark:border-indigo-800 rounded-xl p-6">
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center gap-2">
+                    <Bot className="h-5 w-5 text-indigo-600" />
+                    <h3 className="text-lg font-bold text-indigo-900 dark:text-indigo-100">Agent ID</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      Connected
+                    </span>
+                    <Button variant="outline" size="sm" className="gap-1.5" onClick={async () => {
+                      await navigator.clipboard.writeText(botId);
+                      setCopiedAgentId(true);
+                      setTimeout(() => setCopiedAgentId(false), 2000);
+                    }}>
+                      {copiedAgentId ? <Check className="h-3.5 w-3.5 text-emerald-500" /> : <Copy className="h-3.5 w-3.5" />}
+                      Copy
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  First connected: {bot.lastHeartbeatAt ? new Date(bot.lastHeartbeatAt).toLocaleString() : 'Unknown'}
+                </p>
+                <code className="block rounded-md bg-white/50 dark:bg-slate-900/50 px-4 py-3 text-sm font-mono break-all border border-indigo-100 dark:border-indigo-900">
+                  {botId}
+                </code>
+              </div>
+
+              {/* System Information */}
+              {(() => {
+                // Prefer machineInfo from healthData (freshest), fall back to bot.machineInfo
+                const info = (healthData?.bot?.machineInfo ?? bot.machineInfo) as any;
+                if (!info) return (
+                  <div className="bg-white dark:bg-slate-950 border rounded-lg p-8 text-center">
+                    <Monitor className="h-12 w-12 mx-auto mb-3 text-muted-foreground opacity-20" />
+                    <p className="text-sm text-muted-foreground">Fetching system information...</p>
+                    <p className="text-xs text-muted-foreground mt-1">Will appear after the agent's next health report (~5 min).</p>
+                  </div>
+                );
+                const fields: { key: keyof typeof info; label: string; icon: React.ReactNode; sub?: keyof typeof info }[] = [
+                  { key: 'hostname',     label: 'Hostname',          icon: <Monitor className="h-4 w-4" /> },
+                  { key: 'os',           label: 'Operating System',  icon: <Monitor className="h-4 w-4" /> },
+                  { key: 'arch',         label: 'Architecture',      icon: <Cpu className="h-4 w-4" /> },
+                  { key: 'cpuModel',     label: 'CPU',               icon: <Cpu className="h-4 w-4" />,         sub: 'cpuCores' },
+                  { key: 'totalMemory',  label: 'RAM',               icon: <MemoryStick className="h-4 w-4" />, sub: 'freeMemory' },
+                  { key: 'ipAddress',    label: 'IP Address',        icon: <Wifi className="h-4 w-4" /> },
+                  { key: 'macAddress',   label: 'MAC Address',       icon: <Wifi className="h-4 w-4" /> },
+                  { key: 'agentVersion', label: 'Agent Version',     icon: <Bot className="h-4 w-4" /> },
+                ];
+                return (
+                  <div className="bg-white dark:bg-slate-950 border rounded-lg p-6">
+                    <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
+                      <Monitor className="h-5 w-5" /> System Information
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {fields.filter(f => info[f.key]).map(f => (
+                        <div key={String(f.key)} className="flex items-start gap-3 p-3 rounded-lg bg-slate-50 dark:bg-slate-900">
+                          <span className="text-muted-foreground mt-0.5">{f.icon}</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs text-muted-foreground">{f.label}</p>
+                            <p className="text-sm font-medium truncate font-mono">{String(info[f.key])}</p>
+                            {f.sub && info[f.sub] && (
+                              <p className="text-xs text-muted-foreground">
+                                {f.key === 'cpuModel' ? `${info[f.sub]} cores` : `${info[f.sub]} free`}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+        </TabsContent>
 
         {/* ── Permissions ── */}
         <TabsContent value="permissions" className="space-y-0 bg-slate-50 dark:bg-slate-900 border rounded-lg overflow-hidden">
@@ -406,8 +667,6 @@ export default function BotDetailPage() {
             </div>
           ) : (
             <div className="bg-white dark:bg-slate-950 p-6 space-y-6">
-
-              {/* Status banner */}
               <div className={`flex items-center gap-4 rounded-xl border-2 p-4 ${isOnline ? 'border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20' : 'border-slate-200 bg-slate-50 dark:bg-slate-900'}`}>
                 <div className={`p-2 rounded-lg ${isOnline ? 'bg-emerald-100' : 'bg-slate-100'}`}>
                   {isOnline ? <Wifi className="h-5 w-5 text-emerald-600" /> : <WifiOff className="h-5 w-5 text-slate-400" />}
@@ -424,7 +683,6 @@ export default function BotDetailPage() {
                 </div>
               </div>
 
-              {/* Heartbeat Ribbon */}
               {hLogs.length > 0 ? (
                 <div className="rounded-xl border p-4 space-y-2">
                   <p className="text-sm font-semibold">Heartbeat — Last 60 minutes</p>
@@ -437,7 +695,6 @@ export default function BotDetailPage() {
                 </div>
               )}
 
-              {/* Diagnostics Grid */}
               {diags.length > 0 && (
                 <div>
                   <p className="text-sm font-semibold mb-3">System Diagnostics</p>

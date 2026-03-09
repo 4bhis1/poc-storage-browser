@@ -59,15 +59,15 @@ export async function POST(request: NextRequest) {
 
   const { name, publicKey, permissions } = await request.json();
 
-  if (!name || !publicKey) {
-    return NextResponse.json({ error: 'name and publicKey are required' }, { status: 400 });
+  if (!name) {
+    return NextResponse.json({ error: 'name is required' }, { status: 400 });
   }
 
   const bot = await prisma.botIdentity.create({
     data: {
       name,
-      publicKey,
-      permissions: permissions ?? ['READ', 'SYNC'],
+      publicKey: publicKey || '',
+      permissions: permissions ?? [],
       userId:   user.id,
       tenantId: user.tenantId as string,
     },
@@ -75,7 +75,7 @@ export async function POST(request: NextRequest) {
 
   void logAudit({
     userId:   user.id,
-    action:   'USER_INVITED', // closest existing action — extend AuditAction if desired
+    action:   'USER_INVITED',
     resource: 'BotIdentity',
     resourceId: bot.id,
     details:  { name, permissions },

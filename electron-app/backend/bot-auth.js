@@ -10,7 +10,8 @@ const crypto = require('crypto');
 const axios  = require('axios');
 const os     = require('os');
 
-const API_URL = process.env.ENTERPRISE_URL || 'http://localhost:3000';
+const { ENTERPRISE_URL, getEncryptionKey } = require('./config');
+const API_URL = ENTERPRISE_URL;
 
 // ── Machine-specific encryption key ──────────────────────────────────────────
 function getMachineKey() {
@@ -44,15 +45,42 @@ let _store = null;
 function getStore() {
   if (_store) return _store;
   const Store = require('electron-store');
-  _store = new Store({
-    name: 'cloudvault-bot',
-    encryptionKey: process.env.ENCRYPTION_KEY || 'cloudvault-default-key',
-    schema: {
-      privateKeyPem: { type: 'string', default: '' },
-      publicKeyPem:  { type: 'string', default: '' },
-      botId:         { type: 'string', default: '' },
-    },
-  });
+  try {
+    _store = new Store({
+      name: 'cloudvault-bot',
+      encryptionKey: getEncryptionKey(),
+      schema: {
+        privateKeyPem: { type: 'string', default: '' },
+        publicKeyPem:  { type: 'string', default: '' },
+        botId:         { type: 'string', default: '' },
+      },
+    });
+  } catch (err) {
+    console.warn('[BotAuth] Store initialization failed, attempting recovery:', err.message);
+    // Clear corrupted store file and retry
+    try {
+      const path = require('path');
+      const app = require('electron').app;
+      const storeDir = path.join(app.getPath('userData'), 'cloudvault-bot.json');
+      const fs = require('fs');
+      if (fs.existsSync(storeDir)) {
+        fs.unlinkSync(storeDir);
+        console.log('[BotAuth] Removed corrupted store file, retrying...');
+      }
+      _store = new Store({
+        name: 'cloudvault-bot',
+        encryptionKey: getEncryptionKey(),
+        schema: {
+          privateKeyPem: { type: 'string', default: '' },
+          publicKeyPem:  { type: 'string', default: '' },
+          botId:         { type: 'string', default: '' },
+        },
+      });
+    } catch (retryErr) {
+      console.error('[BotAuth] Store recovery failed:', retryErr.message);
+      throw retryErr;
+    }
+  }
   return _store;
 }
 

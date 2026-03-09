@@ -12,11 +12,12 @@ const {
   ConfirmForgotPasswordCommand,
 } = require('@aws-sdk/client-cognito-identity-provider');
 const crypto = require('crypto');
+const { COGNITO_USER_POOL_ID, COGNITO_CLIENT_ID, COGNITO_CLIENT_SECRET, AWS_REGION } = require('./config');
 
-const REGION      = process.env.AWS_REGION       || 'ap-south-1';
-const CLIENT_ID   = process.env.COGNITO_CLIENT_ID;
-const CLIENT_SECRET = process.env.COGNITO_CLIENT_SECRET;
-const USER_POOL_ID = process.env.COGNITO_USER_POOL_ID;
+const REGION        = AWS_REGION;
+const CLIENT_ID     = COGNITO_CLIENT_ID;
+const CLIENT_SECRET = COGNITO_CLIENT_SECRET;
+const USER_POOL_ID  = COGNITO_USER_POOL_ID;
 
 const client = new CognitoIdentityProviderClient({ region: REGION });
 

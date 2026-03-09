@@ -13,8 +13,9 @@ const { S3Client, CreateMultipartUploadCommand, AbortMultipartUploadCommand } = 
 const database = require('./database');
 const authManager = require('./auth');
 const credentialManager = require('./aws-credentials');
+const { ENTERPRISE_URL } = require('./config');
 
-const API_URL = process.env.ENTERPRISE_URL || 'http://localhost:3000';
+const API_URL = ENTERPRISE_URL + '/api';
 
 class DoctorManager {
   constructor() {

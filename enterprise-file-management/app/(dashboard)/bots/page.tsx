@@ -7,9 +7,8 @@ import { GenericModal } from "@/components/ui/generic-modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Bot, Plus, Copy, Check, KeyRound, ShieldCheck, Clock, ShieldOff, AlertTriangle,
+  Bot, Plus, Copy, Check, ShieldCheck, Clock, ShieldOff, AlertTriangle, Wifi, WifiOff, Clock3,
 } from "lucide-react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import {
@@ -18,10 +17,8 @@ import {
   AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
-  getBots, getBucketsForTenant, registerBot, revokeBot,
+  getBots, registerBot, revokeBot,
 } from "@/app/actions/bots";
-
-const BUCKET_PERMS = ["READ", "WRITE", "DELETE", "SHARE", "DOWNLOAD"];
 
 function parseBucketPerms(permissions: string[]): Record<string, string[]> {
   const map: Record<string, string[]> = {};
@@ -45,69 +42,30 @@ export default function BotsPage() {
     }
   }, [user, router]);
 
-  const [bots, setBots]               = React.useState<any[]>([]);
-  const [buckets, setBuckets]         = React.useState<any[]>([]);
+  const [bots, setBots] = React.useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = React.useState(false);
+  const [botName, setBotName] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [newBotId, setNewBotId] = React.useState<string | null>(null);
+  const [copied, setCopied] = React.useState(false);
 
-  // Register form state
-  const [botName, setBotName]         = React.useState("");
-  const [publicKey, setPublicKey]     = React.useState("");
-  const [bucketPerms, setBucketPerms] = React.useState<Record<string, Set<string>>>({});
-  const [loading, setLoading]         = React.useState(false);
-  const [error, setError]             = React.useState("");
-  const [newBotId, setNewBotId]       = React.useState<string | null>(null);
-  const [copied, setCopied]           = React.useState(false);
-
-  React.useEffect(() => { fetchBots(); fetchBuckets(); }, []);
+  React.useEffect(() => { fetchBots(); }, []);
 
   async function fetchBots() {
     const r = await getBots();
     if (r.success) setBots(r.data ?? []);
   }
 
-  async function fetchBuckets() {
-    const r = await getBucketsForTenant();
-    if (r.success) {
-      setBuckets(r.data ?? []);
-      const init: Record<string, Set<string>> = {};
-      (r.data ?? []).forEach((b: any) => { init[b.id] = new Set(); });
-      setBucketPerms(init);
-    }
-  }
-
   function resetForm() {
-    setBotName(""); setPublicKey(""); setError(""); setNewBotId(null); setCopied(false);
-    const init: Record<string, Set<string>> = {};
-    buckets.forEach(b => { init[b.id] = new Set(); });
-    setBucketPerms(init);
-  }
-
-  function togglePerm(bucketId: string, perm: string) {
-    setBucketPerms(prev => {
-      const next = { ...prev, [bucketId]: new Set(prev[bucketId]) };
-      next[bucketId].has(perm) ? next[bucketId].delete(perm) : next[bucketId].add(perm);
-      return next;
-    });
-  }
-
-  function toggleAllPermsForBucket(bucketId: string) {
-    setBucketPerms(prev => {
-      const cur = prev[bucketId];
-      return { ...prev, [bucketId]: cur.size === BUCKET_PERMS.length ? new Set() : new Set(BUCKET_PERMS) };
-    });
+    setBotName(""); setError(""); setNewBotId(null); setCopied(false);
   }
 
   async function handleRegisterBot() {
-    if (!botName.trim() || !publicKey.trim()) { setError("Account name and public key are required."); return; }
+    if (!botName.trim()) { setError("Account name is required."); return; }
     setError(""); setLoading(true);
     const fd = new FormData();
     fd.set("name", botName.trim());
-    fd.set("publicKey", publicKey.trim());
-    const permsObj: Record<string, string[]> = {};
-    Object.entries(bucketPerms).forEach(([bid, perms]) => {
-      if (perms.size > 0) permsObj[bid] = Array.from(perms);
-    });
-    fd.set("bucketPermissions", JSON.stringify(permsObj));
     const result = await registerBot(fd);
     setLoading(false);
     if (!result.success) { setError(result.error ?? "Failed to register bot"); return; }
@@ -156,21 +114,38 @@ export default function BotsPage() {
     {
       header: "Status",
       accessorKey: "isActive",
-      cell: (row) => (
-        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
-          row.isActive ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
-        }`}>
-          <ShieldCheck className="h-3 w-3" />
-          {row.isActive ? "Active" : "Revoked"}
-        </span>
-      ),
+      cell: (row) => {
+        if (row.isPendingSetup) {
+          return (
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
+              <Clock3 className="h-3 w-3" />
+              Pending Setup
+            </span>
+          );
+        }
+        return (
+          <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
+            row.isActive ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+          }`}>
+            <ShieldCheck className="h-3 w-3" />
+            {row.isActive ? "Active" : "Revoked"}
+          </span>
+        );
+      },
     },
     {
       header: "Connection",
       accessorKey: "connectionStatus",
       cell: (row) => {
+        if (row.connectionStatus === 'never_connected') {
+          return (
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+              <WifiOff className="h-3 w-3" />
+              Never Connected
+            </span>
+          );
+        }
         const isOnline = row.connectionStatus === "online";
-        const hasDiagFailures = row.hasDiagnosticFailures;
         return (
           <div className="flex items-center gap-2">
             <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -178,10 +153,10 @@ export default function BotsPage() {
                 ? "bg-green-100 text-green-700 dark:bg-green-950/50 dark:text-green-400"
                 : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400"
             }`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${isOnline ? "bg-green-500 animate-pulse" : "bg-gray-400"}`} />
+              {isOnline ? <Wifi className="h-3 w-3" /> : <WifiOff className="h-3 w-3" />}
               {isOnline ? "Online" : "Offline"}
             </span>
-            {hasDiagFailures && !isOnline && (
+            {row.hasDiagnosticFailures && !isOnline && (
               <div title="Diagnostics have failures" className="text-yellow-500">
                 <AlertTriangle className="h-4 w-4" />
               </div>
@@ -239,22 +214,22 @@ export default function BotsPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Service Accounts</h1>
           <p className="text-muted-foreground mt-1">
-            Register service accounts for headless automation. Click a row to manage permissions and view activity.
+            Register service accounts for headless automation. Click a row to configure and manage.
           </p>
         </div>
 
         <GenericModal
           title={newBotId ? "Service Account Created" : "Create Service Account"}
-          description={newBotId ? "Copy the Service Account ID and paste it into the CloudVault desktop agent." : "Configure the service account's identity and bucket access permissions."}
+          description={newBotId ? "Copy the Service Account ID and configure it in the agent." : "Enter a name for the service account. You'll configure the key and permissions after creation."}
           open={isModalOpen}
           onOpenChange={(open) => { setIsModalOpen(open); if (!open) resetForm(); }}
           trigger={<Button className="gap-2"><Plus className="h-4 w-4" />Create Account</Button>}
           footer={
             newBotId
-              ? <Button onClick={() => { setIsModalOpen(false); resetForm(); }}>Done</Button>
+              ? <Button onClick={() => { setIsModalOpen(false); resetForm(); router.push(`/bots/${newBotId}`); }}>Go to Agent Config</Button>
               : <Button disabled={loading} onClick={handleRegisterBot}>{loading ? "Creating…" : "Create Account"}</Button>
           }
-          className="sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+          className="sm:max-w-xl"
         >
           {newBotId ? (
             <div className="space-y-4 py-2">
@@ -262,7 +237,7 @@ export default function BotsPage() {
                 <ShieldCheck className="h-5 w-5 text-emerald-600 flex-shrink-0 mt-0.5" />
                 <div>
                   <p className="text-sm font-medium text-emerald-800 dark:text-emerald-300">Service account created successfully</p>
-                  <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Copy the Service Account ID and paste it into the CloudVault desktop agent → Service Account tab → Service Account ID field.</p>
+                  <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-0.5">Click "Go to Agent Config" to set up the public key and configure permissions.</p>
                 </div>
               </div>
               <div className="space-y-1.5">
@@ -279,62 +254,10 @@ export default function BotsPage() {
               </div>
             </div>
           ) : (
-            <div className="space-y-5 py-2">
-              <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 p-3 text-xs text-blue-800 dark:text-blue-300 space-y-1">
-                <p className="font-medium flex items-center gap-1.5"><KeyRound className="h-3.5 w-3.5" /> How to get the public key</p>
-                <ol className="list-decimal list-inside space-y-0.5 pl-1">
-                  <li>Open the CloudVault desktop agent.</li>
-                  <li>Go to Login → Bot tab → Generate Key Pair.</li>
-                  <li>Copy the public key and paste it below.</li>
-                </ol>
-              </div>
+            <div className="space-y-4 py-2">
               <div>
                 <label className="text-sm font-medium">Account Name</label>
                 <Input value={botName} onChange={e => setBotName(e.target.value)} placeholder="e.g. Production Sync Agent" className="mt-1" autoFocus />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Public Key (PEM)</label>
-                <textarea
-                  className="mt-1 w-full rounded-md border border-input bg-background px-3 py-2 text-xs font-mono resize-none focus:outline-none focus:ring-2 focus:ring-ring"
-                  rows={5} placeholder={"-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----"}
-                  value={publicKey} onChange={e => setPublicKey(e.target.value)}
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium">Bucket Access Matrix</label>
-                <p className="text-xs text-muted-foreground mt-0.5 mb-2">Select the actions this service account is allowed to perform on each bucket.</p>
-                {buckets.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic">No buckets found in this tenant.</p>
-                ) : (
-                  <div className="rounded-lg border overflow-hidden">
-                    <div className="grid bg-muted/50 border-b px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide"
-                      style={{ gridTemplateColumns: `1fr repeat(${BUCKET_PERMS.length}, 80px)` }}>
-                      <span>Buckets</span>
-                      {BUCKET_PERMS.map(p => <span key={p} className="text-center">{p}</span>)}
-                    </div>
-                    {buckets.map((bucket, i) => {
-                      const perms = bucketPerms[bucket.id] ?? new Set();
-                      return (
-                        <div key={bucket.id}
-                          className={`grid items-center px-4 py-3 ${i !== buckets.length - 1 ? 'border-b' : ''} hover:bg-muted/30`}
-                          style={{ gridTemplateColumns: `1fr repeat(${BUCKET_PERMS.length}, 80px)` }}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            <Checkbox checked={perms.size === BUCKET_PERMS.length} onCheckedChange={() => toggleAllPermsForBucket(bucket.id)} className="shrink-0" />
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium truncate">{bucket.name}</p>
-                              <p className="text-xs text-muted-foreground">{bucket.region}</p>
-                            </div>
-                          </div>
-                          {BUCKET_PERMS.map(perm => (
-                            <div key={perm} className="flex justify-center">
-                              <Checkbox checked={perms.has(perm)} onCheckedChange={() => togglePerm(bucket.id, perm)} />
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
               </div>
               {error && <p className="text-sm text-red-500 font-medium">{error}</p>}
             </div>
@@ -342,7 +265,7 @@ export default function BotsPage() {
         </GenericModal>
       </div>
 
-      <div className="flex-1 bg-background rounded-lg border shadow-sm p-4">
+      <div className="flex-1 bg-background rounded-lg border shadow-sm p-4 mt-6">
         <DataTable
           data={bots}
           columns={columns}

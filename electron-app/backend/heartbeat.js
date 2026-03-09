@@ -15,7 +15,7 @@ const authManager = require('./auth');
 const botAuth = require('./bot-auth');
 const database = require('./database');
 
-const API_URL      = process.env.ENTERPRISE_URL || 'http://localhost:3000';
+const API_URL      = require('./config').ENTERPRISE_URL;
 const INTERVAL_MS  = 30 * 1000; // 30 seconds
 
 class HeartbeatManager {

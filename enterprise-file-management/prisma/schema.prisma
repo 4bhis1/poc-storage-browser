@@ -220,7 +220,7 @@ model SyncActivity {
 model BotIdentity {
   id               String    @id @default(cuid())
   name             String
-  publicKey        String    @db.Text
+  publicKey        String    @default("") @db.Text
   userId           String
   tenantId         String
   permissions      String[]
@@ -230,6 +230,7 @@ model BotIdentity {
   agentStatus      String?   @default("UNKNOWN")
   heartbeatLogs    Json?
   diagnostics      Json?
+  machineInfo      Json?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
   user             User      @relation(fields: [userId], references: [id])

@@ -17,8 +17,9 @@
 const axios = require('axios');
 const { v4: uuidv4 } = require('uuid');
 const database = require('./database');
+const { ENTERPRISE_URL } = require('./config');
 
-const API_URL = process.env.API_URL || 'http://localhost:3000/api';
+const API_URL = ENTERPRISE_URL + '/api';
 
 class SyncHistoryLogger {
     constructor() {

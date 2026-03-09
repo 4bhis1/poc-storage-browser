@@ -8,8 +8,9 @@ const statusManager = require('./status');
 const database = require('../database');
 const syncHistory = require('../syncHistory');
 
-const API_URL = process.env.API_URL || 'http://localhost:3000/api';
-const ENTERPRISE_URL = process.env.ENTERPRISE_URL || 'http://localhost:3000';
+const config         = require('../config');
+const API_URL        = config.ENTERPRISE_URL;
+const ENTERPRISE_URL = config.ENTERPRISE_URL;
 
 // Match enterprise upload-provider thresholds
 const PART_SIZE = 20 * 1024 * 1024;       // 20MB default

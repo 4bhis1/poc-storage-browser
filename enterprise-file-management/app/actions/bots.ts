@@ -17,11 +17,13 @@ export async function getBots() {
     select: {
       id: true,
       name: true,
+      publicKey: true,
       permissions: true,
       isActive: true,
       lastUsedAt: true,
       lastHeartbeatAt: true,
       diagnostics: true,
+      machineInfo: true,
       createdAt: true,
       user: { select: { email: true, name: true } },
     },
@@ -37,9 +39,19 @@ export async function getBots() {
     const diagnostics = (bot.diagnostics as any[]) ?? []
     const hasDiagFailures = diagnostics.some((d: any) => d.status === 'fail')
     
+    // Determine connection status
+    let connectionStatus = 'never_connected'
+    if (bot.lastHeartbeatAt) {
+      connectionStatus = isOnline ? 'online' : 'offline'
+    }
+    
+    // Determine setup status
+    const isPendingSetup = !bot.publicKey || bot.publicKey === ''
+    
     return {
       ...bot,
-      connectionStatus: isOnline ? 'online' : 'offline',
+      connectionStatus,
+      isPendingSetup,
       hasDiagnosticFailures: hasDiagFailures,
     }
   })
@@ -70,13 +82,44 @@ export async function registerBot(formData: FormData) {
     return { success: false, error: 'Forbidden: ADMIN role required' }
   }
 
-  const name      = formData.get('name') as string
-  const publicKey = formData.get('publicKey') as string
-  // bucketPermissions: JSON string of { [bucketId]: string[] }
-  const bucketPermsRaw = formData.get('bucketPermissions') as string
+  const name = formData.get('name') as string
 
-  if (!name || !publicKey) {
-    return { success: false, error: 'Name and public key are required' }
+  if (!name) {
+    return { success: false, error: 'Name is required' }
+  }
+
+  try {
+    const bot = await prisma.botIdentity.create({
+      data: {
+        name,
+        publicKey: '',
+        permissions: [],
+        userId:   user.id,
+        tenantId: user.tenantId as string,
+      },
+    })
+    revalidatePath('/bots')
+    return { success: true, botId: bot.id }
+  } catch (err: any) {
+    return { success: false, error: err.message }
+  }
+}
+
+export async function configureBotKey(botId: string, publicKey: string) {
+  const user = await getCurrentUser()
+  if (!user) return { success: false, error: 'Unauthorized' }
+  if (user.role !== 'PLATFORM_ADMIN' && user.role !== 'TENANT_ADMIN') {
+    return { success: false, error: 'Forbidden' }
+  }
+
+  const bot = await prisma.botIdentity.findUnique({ where: { id: botId } })
+  if (!bot) return { success: false, error: 'Not found' }
+  if (user.role !== 'PLATFORM_ADMIN' && bot.tenantId !== user.tenantId) {
+    return { success: false, error: 'Forbidden' }
+  }
+
+  if (!publicKey.trim()) {
+    return { success: false, error: 'Public key is required' }
   }
 
   function normalizePem(pem: string): string {
@@ -92,30 +135,13 @@ export async function registerBot(formData: FormData) {
 
   const normalizedKey = normalizePem(publicKey)
 
-  let bucketPermissions: Record<string, string[]> = {}
-  try {
-    bucketPermissions = bucketPermsRaw ? JSON.parse(bucketPermsRaw) : {}
-  } catch {}
+  await prisma.botIdentity.update({
+    where: { id: botId },
+    data: { publicKey: normalizedKey },
+  })
 
-  try {
-    const bot = await prisma.botIdentity.create({
-      data: {
-        name,
-        publicKey: normalizedKey,
-        // Store bucket permissions as JSON in the permissions array field
-        // Format: ["BUCKET:id:READ", "BUCKET:id:UPLOAD", ...]
-        permissions: Object.entries(bucketPermissions).flatMap(([bucketId, perms]) =>
-          perms.map(p => `BUCKET:${bucketId}:${p}`)
-        ),
-        userId:   user.id,
-        tenantId: user.tenantId as string,
-      },
-    })
-    revalidatePath('/bots')
-    return { success: true, botId: bot.id }
-  } catch (err: any) {
-    return { success: false, error: err.message }
-  }
+  revalidatePath('/bots')
+  return { success: true }
 }
 
 export async function updateBotPermissions(botId: string, bucketPermissions: Record<string, string[]>) {

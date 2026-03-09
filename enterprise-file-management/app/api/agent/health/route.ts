@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
     const bot = await prisma.botIdentity.findUnique({ where: { id: botAuth.botId } });
     if (!bot || !bot.isActive) return NextResponse.json({ error: 'Bot revoked' }, { status: 403 });
 
-    const { heartbeatLogs, diagnostics, currentStatus } = await request.json();
+    const { heartbeatLogs, diagnostics, currentStatus, machineInfo } = await request.json();
 
     await prisma.botIdentity.update({
       where: { id: bot.id },
@@ -28,6 +28,7 @@ export async function POST(request: NextRequest) {
         agentStatus: currentStatus ?? 'UNKNOWN',
         heartbeatLogs: heartbeatLogs ?? [],
         diagnostics: diagnostics ?? [],
+        machineInfo: machineInfo ?? bot.machineInfo,
       },
     });
 
@@ -56,7 +57,7 @@ export async function GET(request: NextRequest) {
       select: {
         id: true, name: true, isActive: true,
         lastHeartbeatAt: true, lastUsedAt: true, createdAt: true,
-        agentStatus: true, heartbeatLogs: true, diagnostics: true,
+        agentStatus: true, heartbeatLogs: true, diagnostics: true, machineInfo: true,
       },
     });
 
@@ -64,7 +65,8 @@ export async function GET(request: NextRequest) {
 
     const now = Date.now();
     const lastBeat = bot.lastHeartbeatAt ? new Date(bot.lastHeartbeatAt).getTime() : 0;
-    const isOnline = now - lastBeat < 10 * 1000; // 10 seconds
+    const HEARTBEAT_INTERVAL = 5 * 60 * 1000; // 5 minutes
+    const isOnline = now - lastBeat < HEARTBEAT_INTERVAL;
 
     return NextResponse.json({
       bot: {

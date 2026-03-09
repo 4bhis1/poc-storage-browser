@@ -15,7 +15,7 @@
 const axios = require('axios');
 const authManager = require('./auth');
 
-const API_URL = process.env.ENTERPRISE_URL || 'http://localhost:3000';
+const API_URL = require('./config').ENTERPRISE_URL;
 
 class CredentialManager {
     constructor() {
