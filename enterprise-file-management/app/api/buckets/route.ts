@@ -329,6 +329,31 @@ export async function POST(request: NextRequest) {
       if (isExisting) {
         // Verify the bucket exists and we have access
         await s3.send(new HeadBucketCommand({ Bucket: finalBucketName }));
+
+        // Apply CORS on existing buckets too — required for browser direct uploads
+        const allowedOrigins =
+          process.env.ALLOWED_ORIGINS?.split(",").filter(Boolean) || [];
+        const origins = allowedOrigins.length > 0 ? allowedOrigins : ["*"];
+        try {
+          await s3.send(
+            new PutBucketCorsCommand({
+              Bucket: finalBucketName,
+              CORSConfiguration: {
+                CORSRules: [
+                  {
+                    AllowedHeaders: ["*"],
+                    AllowedMethods: ["PUT", "POST", "GET", "HEAD", "DELETE"],
+                    AllowedOrigins: origins,
+                    ExposeHeaders: ["ETag"],
+                    MaxAgeSeconds: 3000,
+                  },
+                ],
+              },
+            }),
+          );
+        } catch (err) {
+          console.warn("Could not apply CORS on existing bucket:", err);
+        }
       } else {
         // AWS does NOT allow a LocationConstraint for us-east-1 (it's the default)
         const input: any = { Bucket: finalBucketName };
@@ -364,31 +389,31 @@ export async function POST(request: NextRequest) {
           }
 
           // Apply CORS configuration
-          const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(",") || [];
-          if (allowedOrigins.length > 0) {
-            try {
-              await s3.send(
-                new PutBucketCorsCommand({
-                  Bucket: finalBucketName,
-                  CORSConfiguration: {
-                    CORSRules: [
-                      {
-                        AllowedHeaders: ["*"],
-                        AllowedMethods: ["PUT", "POST", "GET", "HEAD"],
-                        AllowedOrigins: allowedOrigins,
-                        ExposeHeaders: ["ETag"],
-                        MaxAgeSeconds: 3000,
-                      },
-                    ],
-                  },
-                }),
-              );
-            } catch (err) {
-              console.warn(
-                "Could not apply CORS, insufficient IAM permissions",
-                err,
-              );
-            }
+          const allowedOrigins =
+            process.env.ALLOWED_ORIGINS?.split(",").filter(Boolean) || [];
+          const origins = allowedOrigins.length > 0 ? allowedOrigins : ["*"];
+          try {
+            await s3.send(
+              new PutBucketCorsCommand({
+                Bucket: finalBucketName,
+                CORSConfiguration: {
+                  CORSRules: [
+                    {
+                      AllowedHeaders: ["*"],
+                      AllowedMethods: ["PUT", "POST", "GET", "HEAD", "DELETE"],
+                      AllowedOrigins: origins,
+                      ExposeHeaders: ["ETag"],
+                      MaxAgeSeconds: 3000,
+                    },
+                  ],
+                },
+              }),
+            );
+          } catch (err) {
+            console.warn(
+              "Could not apply CORS, insufficient IAM permissions",
+              err,
+            );
           }
 
           // Apply Lifecycle Configuration for incomplete multipart uploads

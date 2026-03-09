@@ -74,7 +74,7 @@ export async function DELETE(
 
     const file = await prisma.fileObject.findUnique({
       where: { id },
-      include: { bucket: { include: { account: true, awsAccount: true } } },
+      include: { bucket: { include: { awsAccount: true, tenant: true } } },
     });
 
     if (!file)
@@ -99,10 +99,9 @@ export async function DELETE(
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const account = file.bucket.account;
     const awsAccount = file.bucket.awsAccount;
 
-    const s3 = await getS3Client(account, file.bucket.region, awsAccount);
+    const s3 = await getS3Client(null, file.bucket.region, awsAccount);
 
     // Use a recursive function to delete S3 objects
     const deleteS3Objects = async (prefix: string) => {
@@ -236,7 +235,7 @@ export async function PATCH(
 
     const file = await prisma.fileObject.findUnique({
       where: { id },
-      include: { bucket: { include: { account: true, awsAccount: true } } },
+      include: { bucket: { include: { awsAccount: true, tenant: true } } },
     });
 
     if (!file)
@@ -268,9 +267,8 @@ export async function PATCH(
       );
     }
 
-    const account = file.bucket.account;
     const awsAccount = file.bucket.awsAccount;
-    const s3 = await getS3Client(account, file.bucket.region, awsAccount);
+    const s3 = await getS3Client(null, file.bucket.region, awsAccount);
 
     // Construct new Key
     // Get parent path from old key

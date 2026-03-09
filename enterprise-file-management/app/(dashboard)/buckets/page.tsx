@@ -84,6 +84,7 @@ export default function BucketsPage() {
   const [importedBucketId, setImportedBucketId] = React.useState<string | null>(null)
   const [bucketToDelete, setBucketToDelete] = React.useState<any>(null)
   const [isDeleting, setIsDeleting] = React.useState(false)
+  const [isCreating, setIsCreating] = React.useState(false)
 
   const canCreate = can('WRITE', { resourceType: 'bucket' })
 
@@ -202,6 +203,7 @@ export default function BucketsPage() {
     const region = 'ap-south-1'
     const isExisting = isExistingBucket
 
+    setIsCreating(true)
     try {
       const res = await fetchWithAuth('/api/buckets', {
         method: 'POST',
@@ -224,6 +226,8 @@ export default function BucketsPage() {
       }
     } catch (error) {
       toast.error(isExisting ? "Error mapped bucket" : "Error creating bucket")
+    } finally {
+      setIsCreating(false)
     }
   }
 
@@ -370,7 +374,7 @@ export default function BucketsPage() {
               </p>
             </div>
             {canCreate && (
-              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+              <Dialog open={createOpen} onOpenChange={(open) => { if (!isCreating) setCreateOpen(open) }}>
                 <DialogTrigger asChild>
                   <Button className="gap-1.5 shadow-sm">
                     <Plus className="h-4 w-4" />
@@ -430,8 +434,11 @@ export default function BucketsPage() {
                         </div>
                     )}
                     <div className="flex justify-end gap-2 pt-2">
-                      <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-                      <Button type="submit">{isExistingBucket ? "Add Bucket" : "Create Bucket"}</Button>
+                      <Button type="button" variant="outline" onClick={() => setCreateOpen(false)} disabled={isCreating}>Cancel</Button>
+                      <Button type="submit" disabled={isCreating}>
+                        {isCreating && <RefreshCw className="mr-2 h-4 w-4 animate-spin" />}
+                        {isCreating ? "Please wait..." : isExistingBucket ? "Add Bucket" : "Create Bucket"}
+                      </Button>
                     </div>
                   </form>
                 </DialogContent>

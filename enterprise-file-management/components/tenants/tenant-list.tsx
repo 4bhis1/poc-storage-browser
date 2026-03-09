@@ -12,10 +12,11 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Building, Search, Link as LinkIcon, AlertTriangle } from "lucide-react"
+import { Building, Search, Link as LinkIcon, AlertTriangle, RefreshCw } from "lucide-react"
 import { CreateTenantModal } from "./create-tenant-modal"
 import { formatBytes } from "@/lib/mock-data"
-import { useState } from "react"
+import { useState, useTransition } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import {
     AlertDialog,
@@ -47,6 +48,8 @@ interface TenantListProps {
 export function TenantList({ initialTenants, showAwsLink = false }: TenantListProps) {
     const [searchTerm, setSearchTerm] = useState("")
     const [tenantToReplace, setTenantToReplace] = useState<Tenant | null>(null)
+    const [isPending, startTransition] = useTransition()
+    const router = useRouter()
 
     const filteredTenants = initialTenants.filter(tenant =>
         tenant.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -61,7 +64,20 @@ export function TenantList({ initialTenants, showAwsLink = false }: TenantListPr
                         Manage organizations and their subscription plans.
                     </p>
                 </div>
-                <CreateTenantModal />
+                <div className="flex items-center gap-2">
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-9 gap-1.5 text-xs"
+                        onClick={() => startTransition(() => router.refresh())}
+                        disabled={isPending}
+                        title="Refresh tenants"
+                    >
+                        <RefreshCw className={`h-3.5 w-3.5 ${isPending ? "animate-spin" : ""}`} />
+                        Refresh
+                    </Button>
+                    <CreateTenantModal />
+                </div>
             </div>
 
             <Card>

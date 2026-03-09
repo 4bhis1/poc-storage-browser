@@ -91,7 +91,7 @@ export async function POST(request: Request) {
     await prisma.auditLog.create({
       data: {
         userId: user.id,
-        action: "AWS_ACCOUNT_LINKED",
+        action: "AWS_ACCOUNT_INTEGRATED",
         resource: "aws_account",
         details: JSON.stringify({
           awsAccountId,

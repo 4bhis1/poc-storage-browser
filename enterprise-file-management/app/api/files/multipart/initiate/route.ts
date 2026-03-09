@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
 
     const bucket = await prisma.bucket.findUnique({
       where: { id: bucketId },
-      include: { account: true, awsAccount: true },
+      include: { awsAccount: true, tenant: true },
     });
 
     if (!bucket)
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const account = bucket.account;
+    const account = null;
     const awsAccount = bucket.awsAccount;
 
     let key = name;

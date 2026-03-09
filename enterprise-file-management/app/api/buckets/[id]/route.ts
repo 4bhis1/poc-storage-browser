@@ -7,6 +7,26 @@ import { logAudit } from "@/lib/audit";
 import { checkPermission } from "@/lib/rbac";
 import { getS3Client } from "@/lib/s3";
 
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await getCurrentUser();
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const { id } = await params;
+  const bucket = await prisma.bucket.findUnique({
+    where: { id },
+    select: { id: true, name: true, region: true, tenantId: true, awsAccountId: true },
+  });
+
+  if (!bucket) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (bucket.tenantId !== user.tenantId && user.role !== Role.PLATFORM_ADMIN)
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+  return NextResponse.json(bucket);
+}
+
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> },
@@ -42,7 +62,6 @@ export async function DELETE(
     const bucket = await prisma.bucket.findUnique({
       where: { id: bucketId },
       include: {
-        account: true,
         awsAccount: true,
         _count: { select: { objects: true } },
       },
@@ -90,9 +109,8 @@ export async function DELETE(
     }
 
     // Delete from AWS S3
-    const account = bucket.account;
     const awsAccount = bucket.awsAccount;
-    const s3 = await getS3Client(account, bucket.region, awsAccount);
+    const s3 = await getS3Client(null, bucket.region, awsAccount);
 
     try {
       const { DeleteBucketCommand } = await import("@aws-sdk/client-s3");
@@ -106,6 +124,25 @@ export async function DELETE(
           { error: `AWS S3 error: ${s3Error?.message || "Unknown error"}` },
           { status: 502 },
         );
+      }
+    }
+
+    // Teardown EventBridge rule in tenant account (non-fatal)
+    if (awsAccount && bucket.eventBridgeRuleArn) {
+      try {
+        const { teardownBucketEventBridge } = await import("@/lib/aws/setup-bucket-events");
+        await teardownBucketEventBridge(
+          {
+            roleArn: awsAccount.roleArn,
+            externalId: awsAccount.externalId,
+            awsAccountId: awsAccount.awsAccountId,
+            region: bucket.region,
+          },
+          bucket.name,
+          bucket.eventBridgeRuleArn,
+        );
+      } catch (ebErr) {
+        console.warn("EventBridge teardown failed (non-fatal):", ebErr);
       }
     }
 

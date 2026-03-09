@@ -1,4 +1,5 @@
 import { S3Client, HeadObjectCommand } from "@aws-sdk/client-s3";
+import { STSClient, AssumeRoleCommand } from "@aws-sdk/client-sts";
 import type { SQSEvent, SQSBatchResponse, SQSBatchItemFailure } from "aws-lambda";
 import { getPrismaClient } from "./prisma";
 
@@ -15,21 +16,19 @@ interface ParsedS3Event {
 interface BucketInfo {
   bucketId: string;
   tenantId: string;
+  region: string;
+  awsAccount: {
+    roleArn: string;
+    externalId: string;
+  } | null;
 }
 
 // ─── Event Parsers ────────────────────────────────────────────────────────────
 
-/**
- * Parses an SQS message body into a normalized S3 event.
- * Handles two formats:
- *   1. Direct S3 → SQS notification (same-account buckets)
- *   2. EventBridge → SQS envelope (cross-account BYOA buckets)
- */
 function parseS3Event(body: string): ParsedS3Event[] {
   const parsed = JSON.parse(body);
 
   // ── Format 1: EventBridge envelope ──────────────────────────────────────
-  // EventBridge wraps events with detail-type and detail fields
   if (parsed["detail-type"] && parsed.detail) {
     const detailType: string = parsed["detail-type"];
     const detail = parsed.detail;
@@ -42,10 +41,7 @@ function parseS3Event(body: string): ParsedS3Event[] {
     const eTag: string | undefined = detail.object?.etag;
 
     let type: ParsedS3Event["type"] = "unknown";
-    if (
-      detailType === "Object Created" ||
-      detailType === "Object Restore Completed"
-    ) {
+    if (detailType === "Object Created" || detailType === "Object Restore Completed") {
       type = "created";
     } else if (detailType === "Object Deleted") {
       type = "deleted";
@@ -55,7 +51,6 @@ function parseS3Event(body: string): ParsedS3Event[] {
   }
 
   // ── Format 2: Direct S3 notification ────────────────────────────────────
-  // Standard S3 event notification has a Records array
   if (Array.isArray(parsed.Records)) {
     return parsed.Records.map((record: any) => {
       const bucketName: string = record.s3?.bucket?.name ?? "";
@@ -67,11 +62,8 @@ function parseS3Event(body: string): ParsedS3Event[] {
       const eventName: string = record.eventName ?? "";
 
       let type: ParsedS3Event["type"] = "unknown";
-      if (eventName.startsWith("ObjectCreated")) {
-        type = "created";
-      } else if (eventName.startsWith("ObjectRemoved")) {
-        type = "deleted";
-      }
+      if (eventName.startsWith("ObjectCreated")) type = "created";
+      else if (eventName.startsWith("ObjectRemoved")) type = "deleted";
 
       return { type, bucketName, key, size, eTag };
     });
@@ -83,10 +75,6 @@ function parseS3Event(body: string): ParsedS3Event[] {
 
 // ─── DB Helpers ───────────────────────────────────────────────────────────────
 
-/**
- * Resolves S3 bucket name → internal bucketId + tenantId.
- * Uses a per-invocation cache to avoid repeated DB lookups within a batch.
- */
 async function resolveBucket(
   bucketName: string,
   cache: Map<string, BucketInfo>
@@ -96,7 +84,14 @@ async function resolveBucket(
   const prisma = getPrismaClient();
   const bucket = await prisma.bucket.findFirst({
     where: { name: bucketName },
-    select: { id: true, tenantId: true },
+    select: {
+      id: true,
+      tenantId: true,
+      region: true,
+      awsAccount: {
+        select: { roleArn: true, externalId: true },
+      },
+    },
   });
 
   if (!bucket) {
@@ -104,37 +99,91 @@ async function resolveBucket(
     return null;
   }
 
-  const info: BucketInfo = { bucketId: bucket.id, tenantId: bucket.tenantId };
+  const info: BucketInfo = {
+    bucketId: bucket.id,
+    tenantId: bucket.tenantId,
+    region: bucket.region,
+    awsAccount: bucket.awsAccount
+      ? { roleArn: bucket.awsAccount.roleArn, externalId: bucket.awsAccount.externalId }
+      : null,
+  };
   cache.set(bucketName, info);
   return info;
 }
 
-// System actor used for all lambda-originated audit entries (no real user context)
-const SYSTEM_ACTOR = "system:lambda";
+// ─── S3 Client helpers ────────────────────────────────────────────────────────
 
-// Lazy S3 client — reused across warm invocations
-let s3Client: S3Client | null = null;
-function getS3(): S3Client {
-  if (!s3Client) s3Client = new S3Client({});
-  return s3Client;
+// Default S3 client using Lambda's own role (for same-account buckets)
+let defaultS3: S3Client | null = null;
+function getDefaultS3(): S3Client {
+  if (!defaultS3) defaultS3 = new S3Client({});
+  return defaultS3;
+}
+
+function decrypt(text: string): string {
+  if (!text) return text;
+  const [ivHex, encryptedHex, authTagHex] = text.split(":");
+  if (!ivHex || !encryptedHex || !authTagHex) return text;
+
+  const { createDecipheriv } = require("crypto");
+  const key = Buffer.from(process.env.ENCRYPTION_KEY || "", "hex");
+  const iv = Buffer.from(ivHex, "hex");
+  const authTag = Buffer.from(authTagHex, "hex");
+  const decipher = createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(authTag);
+  let decrypted = decipher.update(encryptedHex, "hex", "utf8");
+  decrypted += decipher.final("utf8");
+  return decrypted;
 }
 
 /**
- * Fetches uploader identity from S3 object metadata (set at presigned URL generation).
- * Returns null if metadata is absent (e.g. direct S3 upload, cross-account BYOA).
+ * Returns an S3 client scoped to the tenant's account via STS AssumeRole.
+ * Falls back to the default Lambda role client if no awsAccount is present (same-account bucket).
  */
+async function getS3ForBucket(bucketInfo: BucketInfo): Promise<S3Client> {
+  if (!bucketInfo.awsAccount) return getDefaultS3();
+
+  const { roleArn, externalId } = bucketInfo.awsAccount;
+  const decryptedExternalId = decrypt(externalId);
+
+  const sts = new STSClient({ region: "us-east-1" });
+  const { Credentials } = await sts.send(
+    new AssumeRoleCommand({
+      RoleArn: roleArn,
+      RoleSessionName: "CamsLambdaHeadObject",
+      ExternalId: decryptedExternalId,
+    })
+  );
+
+  if (!Credentials) throw new Error(`Failed to assume role ${roleArn}`);
+
+  return new S3Client({
+    region: bucketInfo.region,
+    credentials: {
+      accessKeyId: Credentials.AccessKeyId!,
+      secretAccessKey: Credentials.SecretAccessKey!,
+      sessionToken: Credentials.SessionToken!,
+    },
+  });
+}
+
+// ─── Audit helpers ────────────────────────────────────────────────────────────
+
+const SYSTEM_ACTOR = "system:lambda";
+
 async function fetchUploaderIdentity(
+  s3: S3Client,
   bucketName: string,
   key: string
 ): Promise<{ userId: string | null; uploaderType: string } | null> {
   try {
-    const head = await getS3().send(new HeadObjectCommand({ Bucket: bucketName, Key: key }));
+    const head = await s3.send(new HeadObjectCommand({ Bucket: bucketName, Key: key }));
     const meta = head.Metadata ?? {};
-    const userId = meta["uploaded-by-user-id"] ?? null;
-    const uploaderType = meta["uploaded-by-type"] ?? "unknown";
-    return { userId, uploaderType };
+    return {
+      userId: meta["uploaded-by-user-id"] ?? null,
+      uploaderType: meta["uploaded-by-type"] ?? "unknown",
+    };
   } catch (err) {
-    // HeadObject can fail for cross-account buckets or if object was already deleted
     console.warn(`[audit] HeadObject failed for ${bucketName}/${key}:`, err);
     return null;
   }
@@ -163,10 +212,11 @@ async function writeAudit(
       },
     });
   } catch (err) {
-    // Audit failure must never crash the sync — log and move on
     console.error("[audit] Failed to write audit log:", err);
   }
 }
+
+// ─── File sync handlers ───────────────────────────────────────────────────────
 
 async function upsertFileObject(
   bucketInfo: BucketInfo,
@@ -176,12 +226,12 @@ async function upsertFileObject(
   const { bucketId, tenantId } = bucketInfo;
   const { key, size, bucketName } = event;
 
-  // Derive name from key (last segment)
   const name = key.split("/").filter(Boolean).pop() ?? key;
   const isFolder = key.endsWith("/");
 
-  // Fetch uploader identity from S3 metadata (best-effort)
-  const identity = await fetchUploaderIdentity(bucketName, key);
+  // Use cross-account S3 client for BYOA buckets
+  const s3 = await getS3ForBucket(bucketInfo);
+  const identity = await fetchUploaderIdentity(s3, bucketName, key);
   const userId = identity?.userId ?? null;
   const uploaderType = identity?.uploaderType ?? "unknown";
 
@@ -209,16 +259,7 @@ async function upsertFileObject(
     }
 
     const created = await prisma.fileObject.create({
-      data: {
-        name,
-        key,
-        isFolder,
-        size: BigInt(size),
-        bucketId,
-        tenantId,
-        parentId,
-        // createdBy/updatedBy intentionally null — no user context in S3 events
-      },
+      data: { name, key, isFolder, size: BigInt(size), bucketId, tenantId, parentId },
     });
     console.log(`Created FileObject: ${key} in bucket ${bucketId}`);
     const action = isFolder ? "FOLDER_CREATE" : "FILE_UPLOAD";
@@ -234,9 +275,7 @@ async function deleteFileObject(
   const { bucketId } = bucketInfo;
   const { key } = event;
 
-  const file = await prisma.fileObject.findFirst({
-    where: { bucketId, key },
-  });
+  const file = await prisma.fileObject.findFirst({ where: { bucketId, key } });
 
   if (!file) {
     console.warn(`No FileObject found for key: ${key} in bucket ${bucketId}`);
@@ -245,19 +284,13 @@ async function deleteFileObject(
 
   await prisma.fileObject.delete({ where: { id: file.id } });
   console.log(`Deleted FileObject: ${key} in bucket ${bucketId}`);
-  // No HeadObject on delete — object is already gone from S3; userId stays null (system)
   await writeAudit("FILE_DELETE", "FileObject", file.id, { bucketId, key, source: "s3-event" }, "SUCCESS", null);
 }
 
 // ─── Lambda Handler ───────────────────────────────────────────────────────────
 
-export async function handler(
-  event: SQSEvent
-): Promise<SQSBatchResponse> {
+export async function handler(event: SQSEvent): Promise<SQSBatchResponse> {
   const failures: SQSBatchItemFailure[] = [];
-
-  // Per-invocation cache: bucket name → { bucketId, tenantId }
-  // Avoids N DB lookups for N messages from the same bucket in one batch
   const bucketCache = new Map<string, BucketInfo>();
 
   for (const record of event.Records) {
@@ -272,7 +305,6 @@ export async function handler(
 
         const bucketInfo = await resolveBucket(s3Event.bucketName, bucketCache);
         if (!bucketInfo) {
-          // Intentional no-op: bucket not yet registered in our system (e.g. BYOA not onboarded)
           console.warn(`Skipping event — bucket not registered: ${s3Event.bucketName}`);
           continue;
         }
@@ -285,7 +317,6 @@ export async function handler(
       }
     } catch (err) {
       console.error(`Failed to process message ${record.messageId}:`, err);
-      // Report this message as failed — SQS will redeliver only this one
       failures.push({ itemIdentifier: record.messageId });
     }
   }

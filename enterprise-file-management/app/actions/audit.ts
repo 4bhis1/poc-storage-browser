@@ -12,6 +12,7 @@ export async function getAuditLogs(filters?: {
   dateTo?: string;
   page?: number;
   limit?: number;
+  tenantId?: string;
 }) {
   try {
     const user = await getCurrentUser();
@@ -65,6 +66,11 @@ export async function getAuditLogs(filters?: {
         // Fallback if no tenant/policies: only see own logs
         whereClause.userId = user.id;
       }
+    }
+
+    // ── Tenant Filter (PLATFORM_ADMIN only) ──
+    if (user.role === "PLATFORM_ADMIN" && filters?.tenantId) {
+      whereClause.user = { tenantId: filters.tenantId };
     }
 
     // ── 2. Time Range Filters ──

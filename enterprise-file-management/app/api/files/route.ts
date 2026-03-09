@@ -256,7 +256,7 @@ export async function POST(request: NextRequest) {
     // 1. Fetch Bucket and Account to get credentials
     const bucket = await prisma.bucket.findUnique({
       where: { id: bucketId },
-      include: { account: true, awsAccount: true },
+      include: { awsAccount: true, tenant: true },
     });
 
     if (!bucket) {
@@ -276,7 +276,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const account = bucket.account;
+    const account = null;
     if (account && (!account.awsAccessKeyId || !account.awsSecretAccessKey)) {
       // NOTE: Removed strict credential blocking here, as `getS3Client` handles fallbacks.
       // We will let S3 SDK attempt to find credentials.

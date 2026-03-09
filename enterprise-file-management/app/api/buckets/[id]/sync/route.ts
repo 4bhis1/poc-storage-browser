@@ -39,7 +39,7 @@ export async function POST(
     // Fetch bucket with account details
     const bucket = await prisma.bucket.findUnique({
       where: { id: bucketId },
-      include: { account: true, awsAccount: true },
+      include: { awsAccount: true, tenant: true },
     });
 
     if (!bucket)
@@ -47,8 +47,7 @@ export async function POST(
     if (
       !process.env.AWS_PROFILE &&
       !process.env.AWS_ACCESS_KEY_ID &&
-      (!bucket.account?.awsAccessKeyId ||
-        !bucket.account?.awsSecretAccessKey) &&
+      false &&
       !bucket.awsAccount?.roleArn
     ) {
       return NextResponse.json(
@@ -63,7 +62,7 @@ export async function POST(
     const { getS3Client } = await import("@/lib/s3");
     // Initialize S3 Client
     const s3 = await getS3Client(
-      bucket.account,
+      null,
       bucket.region,
       bucket.awsAccount,
     );

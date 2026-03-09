@@ -22,7 +22,9 @@ export type AuditAction =
   | "USER_INVITED"
   | "LOGIN"
   | "LOGOUT"
-  | "IP_ACCESS_DENIED";
+  | "IP_ACCESS_DENIED"
+  | "TENANT_CREATED"
+  | "TENANT_DELETED";
 
 export type AuditStatus = "SUCCESS" | "FAILED";
 
@@ -57,8 +59,7 @@ export function logAudit(params: AuditParams): void {
         details: details ? JSON.stringify(details) : null,
         status,
         ipAddress,
-        createdBy: userId,
-        updatedBy: userId,
+        ...(userId ? { createdBy: userId, updatedBy: userId } : {}),
       },
     })
     .catch((err) => {

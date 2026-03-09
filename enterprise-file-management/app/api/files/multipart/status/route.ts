@@ -53,7 +53,7 @@ export async function POST(request: NextRequest) {
     // Verify bucket access
     const bucket = await prisma.bucket.findUnique({
       where: { id: activeUpload.bucketId },
-      include: { account: true, awsAccount: true },
+      include: { awsAccount: true, tenant: true },
     });
 
     if (!bucket) {
@@ -74,7 +74,7 @@ export async function POST(request: NextRequest) {
 
     try {
       const s3 = await getS3Client(
-        bucket.account,
+        null,
         bucket.region,
         bucket.awsAccount,
       );

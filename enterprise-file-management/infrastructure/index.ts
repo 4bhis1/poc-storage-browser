@@ -172,6 +172,50 @@ const snsPolicyAttachment = new aws.iam.RolePolicyAttachment(
   },
 );
 
+// Allow ECS task to assume cross-account roles (camsAccess-* pattern)
+const crossAccountAssumeRolePolicy = new aws.iam.RolePolicy(
+  "app-task-role-cross-account-assume",
+  {
+    role: taskRole.name,
+    policy: JSON.stringify({
+      Version: "2012-10-17",
+      Statement: [
+        {
+          Effect: "Allow",
+          Action: "sts:AssumeRole",
+          Resource: "arn:aws:iam::*:role/camsAccess-*",
+        },
+      ],
+    }),
+  },
+);
+
+// CloudWatch Log Group for ECS container logs
+const appLogGroup = new aws.cloudwatch.LogGroup("app-log-group", {
+  name: "/ecs/app",
+  retentionInDays: 30,
+  tags: { Purpose: "ecs-app-logs" },
+});
+
+// ECS Task Execution Role — needed for awslogs driver to push to CloudWatch
+const executionRole = new aws.iam.Role("app-execution-role", {
+  assumeRolePolicy: JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Action: "sts:AssumeRole",
+        Principal: { Service: "ecs-tasks.amazonaws.com" },
+        Effect: "Allow",
+      },
+    ],
+  }),
+});
+
+new aws.iam.RolePolicyAttachment("app-execution-role-policy", {
+  role: executionRole.name,
+  policyArn: "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy",
+});
+
 // Fargate Cluster
 const cluster = new aws.ecs.Cluster("app-cluster");
 
@@ -182,12 +226,23 @@ const service = new awsx.ecs.FargateService("app-svc", {
     taskRole: {
       roleArn: taskRole.arn,
     },
+    executionRole: {
+      roleArn: executionRole.arn,
+    },
     container: {
       name: "app",
       image: image.imageUri,
       cpu: 512,
       memory: 1024,
       essential: true,
+      logConfiguration: {
+        logDriver: "awslogs",
+        options: {
+          "awslogs-group": appLogGroup.name,
+          "awslogs-region": process.env.AWS_REGION || "ap-south-1",
+          "awslogs-stream-prefix": "ecs",
+        },
+      },
       portMappings: [
         {
           containerPort: 3000,
@@ -239,6 +294,26 @@ const service = new awsx.ecs.FargateService("app-svc", {
           name: "FILE_SYNC_EVENT_BUS_ARN",
           value: fileSyncEventBus.arn,
         },
+        {
+          name: "AWS_HUB_ACCOUNT_ID",
+          value: process.env.AWS_HUB_ACCOUNT_ID || "",
+        },
+        {
+          name: "ALLOWED_ORIGINS",
+          value: process.env.ALLOWED_ORIGINS || "",
+        },
+        {
+          name: "BOT_JWT_SECRET",
+          value: process.env.BOT_JWT_SECRET || "",
+        },
+        {
+          name: "COGNITO_DOMAIN",
+          value: process.env.COGNITO_DOMAIN || "",
+        },
+        {
+          name: "NEXT_PUBLIC_APP_URL",
+          value: process.env.NEXT_PUBLIC_APP_URL || "",
+        },
       ],
     },
   },
@@ -251,6 +326,7 @@ const service = new awsx.ecs.FargateService("app-svc", {
 
 export const url = alb.loadBalancer.dnsName;
 export const dbEndpoint = db.endpoint;
+export const appLogGroupName = appLogGroup.name;
 
 // ─── File Sync: SQS + Lambda + EventBridge ────────────────────────────────────
 
@@ -389,7 +465,7 @@ new aws.iam.RolePolicyAttachment("file-sync-lambda-basic", {
   policyArn: "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole",
 });
 
-// Inline policy: SQS consume permissions
+// Inline policy: SQS consume + cross-account STS AssumeRole for BYOA HeadObject
 new aws.iam.RolePolicy("file-sync-lambda-sqs-policy", {
   role: lambdaRole.name,
   policy: pulumi
@@ -407,6 +483,11 @@ new aws.iam.RolePolicy("file-sync-lambda-sqs-policy", {
               "sqs:ChangeMessageVisibility",
             ],
             Resource: [queueArn, dlqArn],
+          },
+          {
+            Effect: "Allow",
+            Action: "sts:AssumeRole",
+            Resource: "arn:aws:iam::*:role/camsAccess-*",
           },
         ],
       }),
@@ -443,6 +524,7 @@ const fileSyncLambda = new aws.lambda.Function("file-sync-lambda", {
   environment: {
     variables: {
       DATABASE_URL: pulumi.interpolate`postgresql://myuser:mypassword123%21@${db.endpoint}/filemanagement?schema=public`,
+      ENCRYPTION_KEY: process.env.ENCRYPTION_KEY || "",
     },
   },
   tags: { Purpose: "file-sync" },

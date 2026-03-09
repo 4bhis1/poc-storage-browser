@@ -5,6 +5,9 @@ import { hashPassword } from "@/lib/auth";
 import { revalidatePath } from "next/cache";
 import { Role } from "@/lib/generated/prisma/client";
 import { createUserWithPasswordInCognito } from "@/lib/auth-service";
+import { logAudit } from "@/lib/audit";
+import { deleteTenantWorker } from "@/lib/workers/tenant-deleter";
+import { getCurrentUser } from "@/lib/session";
 
 export async function getTenants() {
   try {
@@ -75,16 +78,19 @@ export async function createTenant(formData: FormData) {
     return { success: false, error: "Missing required fields" };
   }
 
+  const currentUser = await getCurrentUser();
+
   try {
     const hashedPassword = await hashPassword(adminPassword);
+
+    let createdTenant: { id: string; name: string } | null = null;
 
     await prisma.$transaction(async (tx) => {
       // 1. Create Tenant
       const tenant = await tx.tenant.create({
-        data: {
-          name,
-        },
+        data: { name },
       });
+      createdTenant = tenant;
 
       // 2. Create Admin User for Tenant
       await tx.user.create({
@@ -107,6 +113,15 @@ export async function createTenant(formData: FormData) {
       );
     });
 
+    void logAudit({
+      userId: currentUser?.id ?? null,
+      action: "TENANT_CREATED",
+      resource: "Tenant",
+      resourceId: createdTenant!.id,
+      details: { tenantName: name, adminEmail },
+      status: "SUCCESS",
+    });
+
     revalidatePath("/tenants");
     return { success: true };
   } catch (error) {
@@ -115,5 +130,46 @@ export async function createTenant(formData: FormData) {
       success: false,
       error: "Failed to create tenant. Email might already be in use.",
     };
+  }
+}
+
+export async function deleteTenant(tenantId: string) {
+  const currentUser = await getCurrentUser();
+
+  if (!currentUser || currentUser.role !== "PLATFORM_ADMIN") {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: { id: true, name: true },
+  });
+
+  if (!tenant) {
+    return { success: false, error: "Tenant not found" };
+  }
+
+  // Fire-and-forget background worker — same pattern as validateAwsAccount
+  deleteTenantWorker(tenantId, tenant.name, currentUser.id).catch((err) => {
+    console.error("[deleteTenant] Worker error:", err);
+  });
+
+  revalidatePath("/superadmin/tenants");
+  return { success: true };
+}
+
+export async function getTenantsForFilter(): Promise<
+  | { success: true; data: { id: string; name: string }[] }
+  | { success: false; error: string }
+> {
+  try {
+    const data = await prisma.tenant.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    });
+    return { success: true, data };
+  } catch (error) {
+    console.error("Failed to fetch tenants for filter:", error);
+    return { success: false, error: "Failed to fetch tenants" };
   }
 }

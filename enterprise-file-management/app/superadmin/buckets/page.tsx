@@ -21,13 +21,13 @@ export default function SuperAdminBucketsPage() {
     { header: 'Region', accessorKey: 'region' },
     {
       header: 'Tenant',
-      accessorKey: 'account',
-      cell: (row: any) => row.account?.tenant?.name || <span className="text-muted-foreground text-xs">—</span>,
+      accessorKey: 'tenant',
+      cell: (row: any) => row.tenant?.name || <span className="text-muted-foreground text-xs">—</span>,
     },
     {
-      header: 'Account',
-      accessorKey: 'account',
-      cell: (row: any) => row.account?.name || '—',
+      header: 'AWS Account',
+      accessorKey: 'awsAccount',
+      cell: (row: any) => row.awsAccount?.awsAccountId || <span className="text-muted-foreground text-xs">Hub</span>,
     },
     {
       header: 'Versioning',

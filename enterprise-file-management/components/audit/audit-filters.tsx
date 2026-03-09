@@ -13,7 +13,7 @@ import { format } from "date-fns";
 import { DateRange } from "react-day-picker";
 import { cn } from "@/lib/utils";
 
-export function AuditFilters() {
+export function AuditFilters({ tenants = [] }: { tenants?: { id: string; name: string }[] }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -56,6 +56,8 @@ export function AuditFilters() {
   );
 
   const [open, setOpen] = useState(false);
+  const [tenantOpen, setTenantOpen] = useState(false);
+  const currentTenantId = searchParams.get("tenantId");
 
   const ACTIONS = [
     { value: "all", label: "All Actions", group: "General" },
@@ -84,6 +86,10 @@ export function AuditFilters() {
     { value: "LOGIN", label: "Login", group: "Authentication & Security" },
     { value: "LOGOUT", label: "Logout", group: "Authentication & Security" },
     { value: "IP_ACCESS_DENIED", label: "IP Access Denied", group: "Authentication & Security" },
+    { value: "TENANT_CREATED", label: "Tenant Created", group: "Tenant Management" },
+    { value: "TENANT_DELETED", label: "Tenant Deleted", group: "Tenant Management" },
+    { value: "AWS_ACCOUNT_INTEGRATED", label: "AWS Account Integrated", group: "Tenant Management" },
+    { value: "AWS_ACCOUNT_DELETED", label: "AWS Account Deleted", group: "Tenant Management" },
   ];
 
   const groupedActions = ACTIONS.reduce((acc, action) => {
@@ -96,6 +102,71 @@ export function AuditFilters() {
   return (
     <div className="flex items-center gap-4 flex-wrap">
       <div className="flex items-center gap-2">
+        {tenants.length > 0 && (
+          <Popover open={tenantOpen} onOpenChange={setTenantOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                role="combobox"
+                aria-expanded={tenantOpen}
+                className="w-[180px] h-8 text-xs justify-between"
+              >
+                <span className="truncate">
+                  {currentTenantId
+                    ? tenants.find((t) => t.id === currentTenantId)?.name ?? "All Tenants"
+                    : "All Tenants"}
+                </span>
+                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-[200px] p-0" align="start">
+              <Command>
+                <CommandInput placeholder="Search tenants..." className="h-9" />
+                <CommandList>
+                  <CommandEmpty>No tenant found.</CommandEmpty>
+                  <CommandGroup>
+                    <CommandItem
+                      value="all-tenants"
+                      onSelect={() => {
+                        setTenantOpen(false);
+                        const params = new URLSearchParams(searchParams.toString());
+                        params.delete("tenantId");
+                        params.set("page", "1");
+                        router.push(`${pathname}?${params.toString()}`);
+                      }}
+                    >
+                      <Check
+                        className={cn("mr-2 h-4 w-4", !currentTenantId ? "opacity-100" : "opacity-0")}
+                      />
+                      All Tenants
+                    </CommandItem>
+                    {tenants.map((tenant) => (
+                      <CommandItem
+                        key={tenant.id}
+                        value={tenant.name}
+                        onSelect={() => {
+                          setTenantOpen(false);
+                          const params = new URLSearchParams(searchParams.toString());
+                          params.set("tenantId", tenant.id);
+                          params.set("page", "1");
+                          router.push(`${pathname}?${params.toString()}`);
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            "mr-2 h-4 w-4",
+                            currentTenantId === tenant.id ? "opacity-100" : "opacity-0"
+                          )}
+                        />
+                        {tenant.name}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
+            </PopoverContent>
+          </Popover>
+        )}
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
             <Button

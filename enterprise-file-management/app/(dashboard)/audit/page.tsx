@@ -42,6 +42,7 @@ import {
 import { mockCostData, formatDateTime } from "@/lib/mock-data";
 import { SearchCommandDialog } from "@/components/search-command";
 import { getAuditLogs } from "@/app/actions/audit";
+import { getTenantsForFilter } from "@/app/actions/tenants";
 import { AuditLog } from "@/lib/generated/prisma/client";
 import { AuditFilters } from "@/components/audit/audit-filters";
 import { ExportCsvButton } from "@/components/audit/export-csv-button";
@@ -84,10 +85,15 @@ export default async function AuditPage(props: {
   const dateTo = typeof searchParams.dateTo === 'string' ? searchParams.dateTo : undefined;
   const pageParam = typeof searchParams.page === 'string' ? searchParams.page : '1';
   const page = parseInt(pageParam, 10) || 1;
+  const tenantId = typeof searchParams.tenantId === 'string' ? searchParams.tenantId : undefined;
 
-  const result = await getAuditLogs({ action, timeRange, dateFrom, dateTo, page, limit: 10 });
+  const [result, tenantsResult] = await Promise.all([
+    getAuditLogs({ action, timeRange, dateFrom, dateTo, page, limit: 10, tenantId }),
+    getTenantsForFilter().catch(() => ({ success: false as const, error: "Failed" })),
+  ]);
   const logs = result.success ? (result.data as any[]) : [];
   const pagination = result.success ? (result as any).pagination : null;
+  const tenants = tenantsResult.success ? (tenantsResult as any).data : [];
 
   return (
     <>
@@ -118,7 +124,7 @@ export default async function AuditPage(props: {
 
      
               <div className="flex items-center justify-between gap-4 flex-wrap">
-                <AuditFilters />
+                <AuditFilters tenants={tenants} />
                 <div className="flex items-center gap-2">
                   <AuditRefreshButton />
                   <ExportCsvButton logs={logs} />

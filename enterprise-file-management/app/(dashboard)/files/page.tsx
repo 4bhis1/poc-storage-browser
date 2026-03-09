@@ -22,12 +22,20 @@ import { Suspense } from "react"
 function FilesPageContent() {
   const [uploadOpen, setUploadOpen] = React.useState(false)
   const [newFolderOpen, setNewFolderOpen] = React.useState(false)
-  // State for current path - lifted from FileBrowser
   const [path, setPath] = React.useState<{ id: string, name: string }[]>([])
   const [refreshKey, setRefreshKey] = React.useState(0)
+  const [bucketName, setBucketName] = React.useState<string | null>(null)
 
   const searchParams = useSearchParams()
   const bucketId = searchParams.get('bucketId')
+
+  React.useEffect(() => {
+    if (!bucketId) return
+    fetch(`/api/buckets/${bucketId}`)
+      .then(r => r.json())
+      .then(d => d.name && setBucketName(d.name))
+      .catch(() => {})
+  }, [bucketId])
 
   return (
     <>
@@ -40,6 +48,14 @@ function FilesPageContent() {
             <BreadcrumbItem>
               <BreadcrumbPage>Files</BreadcrumbPage>
             </BreadcrumbItem>
+            {bucketName && (
+              <>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>{bucketName}</BreadcrumbPage>
+                </BreadcrumbItem>
+              </>
+            )}
           </BreadcrumbList>
         </Breadcrumb>
       </header>

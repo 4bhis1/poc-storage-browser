@@ -11,3 +11,4 @@ node_modules/
 /lib/generated/prisma
 .env
 *.zip
+.kiro/*

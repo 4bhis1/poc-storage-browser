@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "vitest --run"
   },
   "prisma": {
     "seed": "npx tsx prisma/seed.ts"
@@ -81,6 +82,13 @@
   },
   "devDependencies": {
     "@prisma/client": "^7.4.0",
+    "vitest": "^2.0.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/jest-dom": "^6.0.0",
+    "@testing-library/user-event": "^14.0.0",
+    "jsdom": "^25.0.0",
+    "fast-check": "^3.0.0",
     "@tailwindcss/postcss": "^4.1.13",
     "@types/bcryptjs": "^2.4.6",
     "@types/jsonwebtoken": "^9.0.10",

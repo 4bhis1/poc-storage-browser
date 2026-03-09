@@ -50,7 +50,7 @@ export async function GET(
       where: { id: shareId },
       include: {
         file: true,
-        bucket: { include: { account: true } },
+        bucket: { include: { awsAccount: true } },
       },
     });
 
@@ -90,7 +90,7 @@ export async function GET(
 
     // 4. Generate Presigned URL
     const { getS3Client } = await import("@/lib/s3");
-    const s3 = getS3Client(share.bucket.account, share.bucket.region);
+    const s3 = await getS3Client(null, share.bucket.region, share.bucket.awsAccount);
     const command = new GetObjectCommand({
       Bucket: share.bucket.name,
       Key: share.file.key,

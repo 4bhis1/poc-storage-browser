@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { AddUserDialog } from "@/components/tenants/add-user-dialog"
 import { UserActionsMenu } from "@/components/tenants/user-actions-menu"
 import { TenantAwsAccountTab } from "@/components/tenants/tenant-aws-account-tab"
+import { DeleteTenantButton } from "@/components/tenants/delete-tenant-button"
 
 export default async function TenantDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -98,7 +99,7 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
             <span className="sr-only">Back to Tenants</span>
           </Link>
         </Button>
-        <div>
+        <div className="flex-1">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10 text-primary">
               <Building className="h-5 w-5" />
@@ -107,9 +108,9 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
               <h1 className="text-2xl font-bold tracking-tight">{tenant.name}</h1>
               <p className="text-xs text-muted-foreground font-mono">{tenant.id}</p>
             </div>
-
           </div>
         </div>
+        <DeleteTenantButton tenantId={tenant.id} tenantName={tenant.name} />
       </div>
 
       <Tabs defaultValue="overview" className="space-y-6">

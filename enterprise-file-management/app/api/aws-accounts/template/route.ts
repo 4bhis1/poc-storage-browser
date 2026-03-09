@@ -89,8 +89,28 @@ Resources:
                   - "s3:DeleteBucket"
                   - "s3:PutEncryptionConfiguration"
                   - "s3:PutLifecycleConfiguration"
+                  - "s3:GetBucketNotification"
+                  - "s3:PutBucketNotification"
                 Resource:
                   - "*"
+              - Effect: "Allow"
+                Action:
+                  - "events:PutRule"
+                  - "events:PutTargets"
+                  - "events:DeleteRule"
+                  - "events:RemoveTargets"
+                  - "events:DescribeRule"
+                  - "events:ListTargetsByRule"
+                Resource:
+                  - "*"
+              - Effect: "Allow"
+                Action:
+                  - "iam:GetRole"
+                  - "iam:CreateRole"
+                  - "iam:PutRolePolicy"
+                  - "iam:PassRole"
+                Resource:
+                  - !Sub "arn:aws:iam::${AWS::AccountId}:role/CamsEventBridgeCrossAccountRole"
 Outputs:
   RoleArn:
     Description: "The ARN of the newly created IAM Role"

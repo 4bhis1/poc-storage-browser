@@ -12,6 +12,7 @@ import {
 import { hashPassword } from "@/lib/auth";
 import { Role } from "@/lib/generated/prisma/client";
 import { revalidatePath } from "next/cache";
+import { logAudit } from "@/lib/audit";
 
 export async function getUsers() {
   try {
@@ -82,13 +83,22 @@ export async function inviteUser(formData: FormData) {
     await inviteUserToCognito(email, tenantId, role, name);
 
     // Save user in database
-    await prisma.user.create({
+    const newUser = await prisma.user.create({
       data: {
         name,
         email,
         role,
         tenantId,
       },
+    });
+
+    void logAudit({
+      userId: currentUser.id,
+      action: "USER_INVITED",
+      resource: "User",
+      resourceId: newUser.id,
+      details: { email, role, tenantId },
+      status: "SUCCESS",
     });
 
     revalidatePath("/users");
@@ -193,7 +203,7 @@ export async function createUserWithPassword(formData: FormData) {
     const hashedPassword = await hashPassword(password);
 
     // Save user in database
-    await prisma.user.create({
+    const newUser = await prisma.user.create({
       data: {
         name,
         email,
@@ -201,6 +211,15 @@ export async function createUserWithPassword(formData: FormData) {
         role,
         tenantId,
       },
+    });
+
+    void logAudit({
+      userId: currentUser.id,
+      action: "USER_INVITED",
+      resource: "User",
+      resourceId: newUser.id,
+      details: { email, role, tenantId },
+      status: "SUCCESS",
     });
 
     revalidatePath(`/superadmin/tenants/${tenantId}`);
