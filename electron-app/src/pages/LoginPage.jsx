@@ -337,7 +337,7 @@ export default function LoginPage() {
                 </div>
                 <div className="flex items-start gap-3">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">2</span>
-                    <span>Authenticate with your SSO provider (Google, Okta, etc.).</span>
+                    <span>Authenticate with your SSO.</span>
                 </div>
                 <div className="flex items-start gap-3">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">3</span>

@@ -173,6 +173,7 @@ const initDB = () => {
         "updatedAt" TEXT DEFAULT (datetime('now'))
       );
     `);
+    safeAddColumn('Bucket', 'awsAccountId', 'TEXT');
 
     conn.exec(`
       CREATE TABLE IF NOT EXISTS "FileObject" (

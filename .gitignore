@@ -46,3 +46,6 @@ next-env.d.ts
 amplify_outputs*
 amplifyconfiguration*
 .vscode
+release
+/dist
+/planning

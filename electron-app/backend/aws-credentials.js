@@ -52,7 +52,7 @@ class CredentialManager {
         try {
             const response = await axios.post(
                 `${API_URL}/api/agent/credentials`,
-                accountId ? { accountId } : {},
+                accountId ? { awsAccountId: accountId } : {},
                 {
                     headers: { Authorization: `Bearer ${token}` },
                     timeout: 15000,
@@ -103,8 +103,9 @@ class CredentialManager {
      */
     async getCredentialsForBucket(bucketId) {
         const database = require('./database');
+        // awsAccountId is the enterprise AwsAccount record ID stored on the Bucket row
         const result = await database.query(
-            'SELECT b."accountId", a.name FROM "Bucket" b JOIN "Account" a ON b."accountId" = a.id WHERE b.id = $1',
+            'SELECT "awsAccountId" FROM "Bucket" WHERE id = $1',
             [bucketId]
         );
 
@@ -112,8 +113,8 @@ class CredentialManager {
             throw new Error(`Bucket ${bucketId} not found in local database`);
         }
 
-        const accountId = result.rows[0].accountId;
-        return await this.getCredentials(accountId);
+        const awsAccountId = result.rows[0].awsAccountId || null;
+        return await this.getCredentials(awsAccountId);
     }
 }
 

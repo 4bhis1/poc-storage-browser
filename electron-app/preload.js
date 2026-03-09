@@ -16,6 +16,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectFolderForUpload: () => ipcRenderer.invoke('select-folder-upload'),
   uploadItems: (items, currentPath, shouldZip) => ipcRenderer.invoke('upload-items', { items, currentPath, shouldZip }),
   downloadFile: (url, targetPath) => ipcRenderer.invoke('download-file', { url, targetPath }),
+  downloadS3File: (bucketId, s3Key, localPath, totalSize) => ipcRenderer.invoke('download-s3-file', { bucketId, s3Key, localPath, totalSize }),
+  selectDownloadFolder: () => ipcRenderer.invoke('select-sync-folder'), // reuse existing folder picker
 
   // 2b. Get the real filesystem path from a File object (Electron 32+ replacement for File.prototype.path)
   getFilePath: (file) => {

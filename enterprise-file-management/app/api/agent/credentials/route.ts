@@ -84,11 +84,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get connected AWS account for this tenant
+    // Optional: caller can request credentials for a specific AWS account
+    let requestedAwsAccountId: string | null = null;
+    try {
+      const body = await request.json();
+      requestedAwsAccountId = body?.awsAccountId || null;
+    } catch {}
+
+    // Get connected AWS account for this tenant (specific or first available)
     const awsAccount = await prisma.awsAccount.findFirst({
       where: {
         tenantId,
         status: "CONNECTED",
+        ...(requestedAwsAccountId ? { id: requestedAwsAccountId } : {}),
       },
     });
 

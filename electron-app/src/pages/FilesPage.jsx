@@ -16,7 +16,7 @@ import {
   Archive, ArrowUpDown, ChevronRight,
   File, FileCode, FileText,
   FolderOpen, HardDrive, Image,
-  List, LayoutGrid, Music, RefreshCw, Video
+  List, LayoutGrid, Music, RefreshCw, Video, Download
 } from 'lucide-react';
 
 const ROOT_PATH = "/home/abhishek/FMS";
@@ -174,6 +174,25 @@ export default function FilesPage() {
     }
   };
 
+  // Download file from S3 to a user-chosen folder
+  const handleDownload = async (e, file) => {
+    e.stopPropagation();
+    if (file.isFolder) return;
+
+    const destFolder = await window.electronAPI.selectDownloadFolder();
+    if (!destFolder) return;
+
+    const localPath = `${destFolder}/${file.name}`;
+    // s3Key is the full key relative to bucket root
+    const s3Key = [...folderStack.map(f => f.name), file.name].join('/');
+
+    try {
+      await window.electronAPI.downloadS3File(bucketId, s3Key, localPath, file.size || 0);
+    } catch (err) {
+      console.error('[FilesPage] Download failed:', err);
+    }
+  };
+
   return (
     <div className="space-y-4 p-6 h-full overflow-auto">
       {/* ── Toolbar ──────────────────────────────────────────────────────── */}
@@ -303,6 +322,7 @@ export default function FilesPage() {
                 <TableHead>Name</TableHead>
                 <TableHead className="hidden md:table-cell">Size</TableHead>
                 <TableHead className="hidden lg:table-cell">Modified</TableHead>
+                <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -332,6 +352,19 @@ export default function FilesPage() {
                   <TableCell className="hidden lg:table-cell text-muted-foreground text-sm">
                     {formatDate(file.updatedAt)}
                   </TableCell>
+                  <TableCell onClick={e => e.stopPropagation()} className="text-right">
+                    {!file.isFolder && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                        title="Download from S3"
+                        onClick={(e) => handleDownload(e, file)}
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -343,7 +376,7 @@ export default function FilesPage() {
       {!loading && viewMode === "grid" && currentFiles.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
           {currentFiles.map(file => (
-            <Card
+              <Card
               key={file.id}
               className={`group cursor-pointer transition-colors hover:bg-accent/50 ${selected.has(file.id) ? "ring-2 ring-primary" : ""}`}
               onClick={() => handleItemClick(file)}
@@ -353,6 +386,17 @@ export default function FilesPage() {
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-secondary">
                     <FileIcon file={file} className="h-5 w-5" />
                   </div>
+                  {!file.isFolder && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity -mt-1 -mr-1"
+                      title="Download from S3"
+                      onClick={(e) => handleDownload(e, file)}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <p className="text-sm font-medium truncate">{file.name}</p>

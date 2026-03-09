@@ -317,8 +317,35 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // DB record creation is now handled asynchronously by the file-sync Lambda
-    // via S3 event notification → SQS → Lambda pipeline.
+    // DB record creation:
+    console.log(">> @@@ file Upload::: multipart", process.env.NODE_ENV)
+
+    // - DEV: write directly to DB (no SQS/Lambda running locally)
+    // - PROD: handled asynchronously by the file-sync Lambda via S3 event → SQS → Lambda
+    if (process.env.NODE_ENV === 'development') {
+      const fileId = `${bucketId}-${key}-${Date.now()}`;
+      await prisma.fileObject.upsert({
+        where: { id: fileId },
+        create: {
+          id: fileId,
+          name,
+          key,
+          isFolder: !!isFolder,
+          size: size ? BigInt(size) : null,
+          mimeType: mimeType || null,
+          bucket: { connect: { id: bucket.id } },
+          tenant: { connect: { id: bucket.tenantId } },
+          parent: parentId ? { connect: { id: parentId } } : undefined,
+        },
+        update: {
+          name,
+          size: size ? BigInt(size) : null,
+          mimeType: mimeType || null,
+          updatedAt: new Date(),
+        },
+      });
+    }
+
     logAudit({
       userId: user.id,
       action: isFolder ? "FOLDER_CREATE" : "FILE_UPLOAD",

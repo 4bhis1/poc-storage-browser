@@ -218,7 +218,7 @@ export function AppSidebar({ serverUser }: { serverUser?: SidebarUser }) {
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <SidebarMenuButton size="lg" className="w-full">
+                <SidebarMenuButton size="lg" className="w-full cursor-pointer">
                   <Avatar className="h-7 w-7">
                     <AvatarFallback className="bg-primary/10 text-primary text-xs">
                       {user.name?.substring(0, 2).toUpperCase() || "U"}
@@ -271,7 +271,7 @@ export function AppSidebar({ serverUser }: { serverUser?: SidebarUser }) {
                   <ThemeToggle />
                 </div>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={logout}>
+                <DropdownMenuItem onClick={logout} className="font-red cursor-pointer">
                   <LogOut className="mr-2 h-4 w-4" />
                   Sign out
                 </DropdownMenuItem>

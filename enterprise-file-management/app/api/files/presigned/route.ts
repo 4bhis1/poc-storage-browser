@@ -152,6 +152,30 @@ export async function GET(request: NextRequest) {
 
     const url = await getSignedUrl(s3, command, { expiresIn: 3600 });
 
+    // DEV: write FileObject to DB immediately on upload URL generation
+    // PROD: handled by file-sync Lambda via S3 event → SQS pipeline
+    if (process.env.NODE_ENV === 'development' && !action) {
+      const fileId = `${bucketId}-${key}-${Date.now()}`;
+      await prisma.fileObject.upsert({
+        where: { id: fileId },
+        create: {
+          id: fileId,
+          name: name as string,
+          key,
+          isFolder: false,
+          size: null,
+          mimeType: contentType,
+          bucket: { connect: { id: bucket.id } },
+          tenant: { connect: { id: bucket.tenantId } },
+          parent: (parentId && parentId !== 'null') ? { connect: { id: parentId } } : undefined,
+        },
+        update: {
+          mimeType: contentType,
+          updatedAt: new Date(),
+        },
+      });
+    }
+
     logAudit({
       userId: user.id,
       action:

@@ -388,7 +388,7 @@ export default function BucketsPage() {
                       {isExistingBucket ? "Map an existing S3 bucket to your account." : "Create a new S3 bucket connected to your AWS Account."}
                     </DialogDescription>
                   </DialogHeader>
-                  <div className="flex items-center space-x-2 py-2">
+                  <div className="flex items-center space-x-2 py-2 cursor-pointer">
                     <Switch
                       id="existing-bucket-mode"
                       checked={isExistingBucket}
@@ -413,14 +413,14 @@ export default function BucketsPage() {
                                 <Label>Versioning</Label>
                                 <p className="text-xs text-muted-foreground">Keep multiple versions of objects</p>
                               </div>
-                              <Switch name="versioning" />
+                              <Switch name="versioning" className="cursor-pointer" />
                             </div>
                             <div className="flex items-center justify-between">
                               <div className="space-y-0.5">
                                 <Label>Encryption</Label>
                                 <p className="text-xs text-muted-foreground">AES-256 server-side encryption</p>
                               </div>
-                              <Switch defaultChecked name="encryption" />
+                              <Switch defaultChecked name="encryption"  className="cursor-pointer"/>
                             </div>
                         </>
                     )}
