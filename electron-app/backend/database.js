@@ -373,7 +373,7 @@ const wipeAllData = () => {
   try {
     const tables = [
       'LocalSyncActivity', 'SyncJob', 'SyncMapping', 'SyncConfig',
-      'SyncState', 'FileObject', 'Bucket', 'Account', 'Tenant',
+      'SyncState', 'FileObject', 'Bucket', 'Account', 'Tenant', 'KVStore',
     ];
     for (const t of tables) {
       conn.exec(`DELETE FROM "${t}";`);

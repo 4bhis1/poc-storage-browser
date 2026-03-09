@@ -76,6 +76,11 @@ export default function ExplorerPage() {
   const [activeFilters, setActiveFilters] = useState(new Set());
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [rootPath, setRootPath] = useState(null);
+
+  useEffect(() => {
+    window.electronAPI.getRootPath().then(setRootPath);
+  }, []);
   
   const [page, setPage] = useState(1);
   const itemsPerPage = 20;
@@ -148,12 +153,8 @@ export default function ExplorerPage() {
   }, [filteredFiles, page]);
 
   const handleItemClick = async (file) => {
-    // Open natively
-    const ROOT_PATH = "/home/abhishek/FMS";
-    // We assume file.path contains the relative path (e.g., 'folder/file.ext' or 'file.ext') within the bucket.
-    // If path is not available, we fallback to just name for flat root structures.
     const relativePath = file.path ? file.path : file.name;
-    const localPath = `${ROOT_PATH}/${file.bucketName}/${relativePath}`;
+    const localPath = `${rootPath}/${file.bucketName}/${relativePath}`;
     
     try {
       await window.electronAPI.openFile(localPath.replace(/\/+/g, '/'));

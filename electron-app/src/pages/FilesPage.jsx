@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
@@ -19,7 +19,7 @@ import {
   List, LayoutGrid, Music, RefreshCw, Video, Download
 } from 'lucide-react';
 
-const ROOT_PATH = "/home/abhishek/FMS";
+
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 const formatBytes = (bytes) => {
@@ -82,27 +82,59 @@ export default function FilesPage() {
   const [sortKey, setSortKey] = useState('name');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState(new Set());
+  const [rootPath, setRootPath] = useState(null);
+
+  useEffect(() => {
+    window.electronAPI.getRootPath().then(setRootPath);
+  }, []);
 
   // ── Fetch ────────────────────────────────────────────────────────────────
   const fetchFiles = useCallback(async () => {
-    if (!bucketId) { setLoading(false); return; }
+    if (!bucketId || !rootPath) { setLoading(false); return; }
     setLoading(true);
     try {
       const bucketRes = await window.electronAPI.dbQuery('SELECT name FROM "Bucket" WHERE id = $1', [bucketId]);
-      if (bucketRes.rows.length > 0) {
-        const bucket = bucketRes.rows[0];
-        setBucketInfo(bucket);
-        const physPath = [ROOT_PATH, bucket.name, ...folderStack.map(f => f.name)].join('/');
-        const content = await window.electronAPI.listContent({ folderPath: physPath, sortBy: 'az' });
-        setFiles(content || []);
-      }
+      if (bucketRes.rows.length === 0) { setLoading(false); return; }
+
+      const bucket = bucketRes.rows[0];
+      setBucketInfo(bucket);
+
+      // Build the S3 key prefix for the current folder level
+      const folderPrefix = folderStack.length > 0
+        ? folderStack.map(f => f.name).join('/') + '/'
+        : null;
+
+      // Query SQLite — source of truth (files are synced here even before local download)
+      const parentFilter = folderStack.length === 0
+        ? `fo."parentId" IS NULL`
+        : `fo."parentId" = (
+            SELECT id FROM "FileObject"
+            WHERE "bucketId" = $2 AND "key" = $3
+            LIMIT 1
+          )`;
+
+      const queryParams = folderStack.length === 0
+        ? [bucketId]
+        : [bucketId, bucketId, folderStack.map(f => f.name).join('/')];
+
+      const dbRes = await window.electronAPI.dbQuery(
+        `SELECT fo.id, fo.name, fo.key, fo."isFolder", fo.size, fo."mimeType",
+                fo."updatedAt", fo."isSynced", fo."syncStatus"
+         FROM "FileObject" fo
+         WHERE fo."bucketId" = $1
+           AND ${parentFilter}
+         ORDER BY fo."isFolder" DESC, fo.name ASC`,
+        queryParams
+      );
+
+      setFiles(dbRes.rows || []);
     } catch (err) {
       console.error('fetchFiles error:', err);
       setFiles([]);
     } finally {
       setLoading(false);
     }
-  }, [bucketId, folderStack]);
+  }, [bucketId, folderStack, rootPath]);
 
   useEffect(() => {
     fetchFiles();
@@ -164,7 +196,7 @@ export default function FilesPage() {
       navigateToFolder(file);
     } else {
       // Build full local path and open with the OS default application
-      const parts = [ROOT_PATH, bucketInfo?.name, ...folderStack.map(f => f.name), file.name];
+      const parts = [rootPath, bucketInfo?.name, ...folderStack.map(f => f.name), file.name];
       const localPath = parts.join('/');
       try {
         await window.electronAPI.openFile(localPath);

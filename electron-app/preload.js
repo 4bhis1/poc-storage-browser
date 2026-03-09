@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
   },
   
+  // 2c. Get the root sync path from main process
+  getRootPath: () => ipcRenderer.invoke('get-root-path'),
+
   // 3. Status Tracking
   getActiveTransfers: () => ipcRenderer.invoke('get-active-transfers'),
   onTransferStatusUpdate: (callback) => {

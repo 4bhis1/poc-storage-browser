@@ -157,7 +157,22 @@ class SyncManager {
         }
 
         // 3. Sync top-level buckets (API returns buckets directly, not nested under accounts)
-        //    Buckets have tenantId — use it to resolve/create a synthetic accountId.
+        //    On a full sync (no updatedSince), reconcile: delete local buckets not in the API response.
+        if (!lastSyncAt && Array.isArray(buckets)) {
+            const returnedIds = buckets.map(b => b.id).filter(Boolean);
+            if (returnedIds.length > 0) {
+                const placeholders = returnedIds.map((_, i) => `$${i + 1}`).join(', ');
+                database.query(
+                    `DELETE FROM "Bucket" WHERE id NOT IN (${placeholders})`,
+                    returnedIds
+                );
+            } else {
+                // API returned zero buckets — wipe all local buckets
+                database.query(`DELETE FROM "Bucket"`, []);
+            }
+            console.log(`[SyncManager] Reconciled local buckets — kept IDs: [${returnedIds.join(', ')}]`);
+        }
+
         for (const bucket of (buckets || [])) {
             try {
                 // Derive accountId: use awsAccountId if present, else fall back to tenantId

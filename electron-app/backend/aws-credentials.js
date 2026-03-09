@@ -72,6 +72,7 @@ class CredentialManager {
             return this.cache.get(cacheKey).credentials;
 
         } catch (error) {
+            console.log("[getCredentials] error:", error)
             if (error.response?.status === 401) {
                 console.error('[CredentialManager] Authentication failed - token may be expired');
                 throw new Error('Authentication expired. Please log in again.');
@@ -79,6 +80,12 @@ class CredentialManager {
                 console.error('[CredentialManager] Access denied - bot may be revoked');
                 throw new Error('Access denied. Your bot may have been revoked.');
             } else if (error.response?.status === 404) {
+                // No tenant-specific AWS account — if we were requesting a specific account,
+                // retry without it to let the backend use hub credentials
+                if (accountId) {
+                    console.log('[CredentialManager] Specific account not found, retrying with hub fallback...');
+                    return await this.getCredentials(null);
+                }
                 console.error('[CredentialManager] No AWS account found');
                 throw new Error('No AWS account configured for your tenant.');
             } else {

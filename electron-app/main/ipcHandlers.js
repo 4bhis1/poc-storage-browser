@@ -6,6 +6,9 @@ const authManager = require("../backend/auth");
 const botAuth = require("../backend/bot-auth");
 
 function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
+  // 0. Root path
+  ipcMain.handle('get-root-path', () => rootPath);
+
   // 1. Local File Handling
   ipcMain.handle(
     "list-path-content",
