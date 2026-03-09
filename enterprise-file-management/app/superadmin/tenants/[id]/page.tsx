@@ -14,6 +14,7 @@ import { AddUserDialog } from "@/components/tenants/add-user-dialog"
 import { UserActionsMenu } from "@/components/tenants/user-actions-menu"
 import { TenantAwsAccountTab } from "@/components/tenants/tenant-aws-account-tab"
 import { DeleteTenantButton } from "@/components/tenants/delete-tenant-button"
+import { EditTenantDialog } from "@/components/tenants/edit-tenant-dialog"
 
 export default async function TenantDetailsPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -105,7 +106,10 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
               <Building className="h-5 w-5" />
             </div>
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">{tenant.name}</h1>
+              <div className="flex items-center">
+                <h1 className="text-2xl font-bold tracking-tight">{tenant.name}</h1>
+                <EditTenantDialog tenantId={tenant.id} currentName={tenant.name} />
+              </div>
               <p className="text-xs text-muted-foreground font-mono">{tenant.id}</p>
             </div>
           </div>
@@ -356,6 +360,7 @@ export default async function TenantDetailsPage({ params }: { params: Promise<{ 
             awsAccounts={tenant.awsAccounts.map(a => ({
               ...a,
               createdAt: a.createdAt.toISOString(),
+              lastValidatedAt: a.lastValidatedAt?.toISOString() || null,
             }))}
           />
         </TabsContent>

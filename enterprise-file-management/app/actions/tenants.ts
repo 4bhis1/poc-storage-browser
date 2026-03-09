@@ -169,7 +169,42 @@ export async function getTenantsForFilter(): Promise<
     });
     return { success: true, data };
   } catch (error) {
-    console.error("Failed to fetch tenants for filter:", error);
     return { success: false, error: "Failed to fetch tenants" };
+  }
+}
+
+export async function updateTenant(tenantId: string, newName: string) {
+  const currentUser = await getCurrentUser();
+
+  if (!currentUser || currentUser.role !== "PLATFORM_ADMIN") {
+    return { success: false, error: "Unauthorized" };
+  }
+
+  if (!newName || newName.trim() === "") {
+    return { success: false, error: "Tenant name cannot be empty" };
+  }
+
+  try {
+    const tenant = await prisma.tenant.update({
+      where: { id: tenantId },
+      data: { name: newName.trim() },
+    });
+
+    void logAudit({
+      userId: currentUser.id,
+      action: "TENANT_UPDATED",
+      resource: "Tenant",
+      resourceId: tenant.id,
+      details: { oldName: tenant.name, newName: newName.trim() },
+      status: "SUCCESS",
+    });
+
+    revalidatePath("/superadmin/tenants");
+    revalidatePath(`/superadmin/tenants/${tenantId}`);
+
+    return { success: true, data: { id: tenant.id, name: tenant.name } };
+  } catch (error) {
+    console.error("Failed to update tenant:", error);
+    return { success: false, error: "Failed to update tenant name" };
   }
 }

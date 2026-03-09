@@ -24,6 +24,7 @@ export type AuditAction =
   | "LOGOUT"
   | "IP_ACCESS_DENIED"
   | "TENANT_CREATED"
+  | "TENANT_UPDATED"
   | "TENANT_DELETED"
   | "AGENT_CREDENTIALS_REQUESTED";
 
