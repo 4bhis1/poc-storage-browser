@@ -24,7 +24,8 @@ export type AuditAction =
   | "LOGOUT"
   | "IP_ACCESS_DENIED"
   | "TENANT_CREATED"
-  | "TENANT_DELETED";
+  | "TENANT_DELETED"
+  | "AGENT_CREDENTIALS_REQUESTED";
 
 export type AuditStatus = "SUCCESS" | "FAILED";
 

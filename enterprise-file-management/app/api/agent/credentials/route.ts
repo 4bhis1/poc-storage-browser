@@ -17,6 +17,8 @@ import { getTenantAwsCredentials } from "@/lib/aws/sts";
 import { decrypt } from "@/lib/encryption";
 import { logAudit } from "@/lib/audit";
 import { verifyBotToken } from "@/lib/bot-auth";
+import { STSClient, GetCallerIdentityCommand } from "@aws-sdk/client-sts";
+import { fromNodeProviderChain } from "@aws-sdk/credential-providers";
 
 export async function POST(request: NextRequest) {
   try {
@@ -100,27 +102,51 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    if (!awsAccount) {
-      return NextResponse.json(
-        {
-          error:
-            "No connected AWS account found. Please link an AWS account first.",
-        },
-        { status: 404 },
-      );
-    }
-
-    // Generate temporary credentials via STS AssumeRole
-    const decryptedExternalId = decrypt(awsAccount.externalId);
     const sessionName = `Agent-${identityType}-${identityName.replace(/[^a-zA-Z0-9+=,.@_-]/g, "")}-${Date.now()}`;
-
-    const credentials = await getTenantAwsCredentials(
-      awsAccount.roleArn,
-      decryptedExternalId,
-      sessionName,
-    );
-
+    let credentials: { accessKeyId: string; secretAccessKey: string; sessionToken?: string };
+    let credentialRegion: string;
     const expiration = new Date(Date.now() + 3600 * 1000).toISOString();
+
+    if (awsAccount) {
+      // Tenant has a linked AWS account — use cross-account STS AssumeRole
+      const decryptedExternalId = decrypt(awsAccount.externalId);
+      const sts = await getTenantAwsCredentials(
+        awsAccount.roleArn,
+        decryptedExternalId,
+        sessionName,
+      );
+      credentials = sts;
+      credentialRegion = awsAccount.region;
+    } else if (process.env.AWS_ACCESS_KEY_ID && process.env.AWS_SECRET_ACCESS_KEY) {
+      // Explicit env var credentials (dev / static key fallback)
+      credentials = {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+        sessionToken: process.env.AWS_SESSION_TOKEN,
+      };
+      credentialRegion = process.env.AWS_REGION || "ap-south-1";
+      console.log(`[AgentCredentials] Tenant ${tenantId} has no linked AWS account — using env var credentials`);
+    } else {
+      // Fall through to AWS SDK default credential chain (ECS task role, IMDS, AWS_PROFILE, etc.)
+      // Same as getS3Client step 3
+      try {
+        const provider = fromNodeProviderChain();
+        const resolved = await provider();
+        credentials = {
+          accessKeyId: resolved.accessKeyId,
+          secretAccessKey: resolved.secretAccessKey,
+          sessionToken: resolved.sessionToken,
+        };
+        credentialRegion = process.env.AWS_REGION || "ap-south-1";
+        console.log(`[AgentCredentials] Tenant ${tenantId} has no linked AWS account — using default credential chain (task role/IMDS)`);
+      } catch (chainError) {
+        console.error("[AgentCredentials] Default credential chain failed:", chainError);
+        return NextResponse.json(
+          { error: "No AWS account configured for your tenant and no ambient credentials available." },
+          { status: 404 },
+        );
+      }
+    }
 
     // Audit log
     await logAudit({
@@ -134,8 +160,9 @@ export async function POST(request: NextRequest) {
         "unknown",
       details: {
         identityType,
-        awsAccountId: awsAccount.awsAccountId,
-        region: awsAccount.region,
+        awsAccountId: awsAccount?.awsAccountId || "hub",
+        region: credentialRegion,
+        hubFallback: !awsAccount,
       },
     });
 
@@ -151,8 +178,9 @@ export async function POST(request: NextRequest) {
       accessKeyId: credentials.accessKeyId,
       secretAccessKey: credentials.secretAccessKey,
       sessionToken: credentials.sessionToken,
-      region: awsAccount.region,
+      region: credentialRegion,
       expiration,
+      accountName: awsAccount?.friendlyName || "hub",
     });
   } catch (error: any) {
     console.error("[AgentCredentials] Error:", error);
