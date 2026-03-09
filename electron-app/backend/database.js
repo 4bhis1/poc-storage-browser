@@ -254,6 +254,7 @@ const initDB = () => {
         "createdAt" TEXT DEFAULT (datetime('now'))
       );
     `);
+    safeAddColumn('SyncMapping', 'shouldZip', 'INTEGER', '0');
 
     conn.exec(`
       CREATE TABLE IF NOT EXISTS "SyncJob" (

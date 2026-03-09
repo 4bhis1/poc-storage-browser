@@ -107,7 +107,7 @@ class BackendCentral {
     /**
      * Specialized Zip + Upload logic requested by user.
      */
-    async uploadItems(items, destDir, shouldZip) {
+    async uploadItems(items, destDir, shouldZip, rootPath) {
         const results = [];
 
         // Collect all folder items to decide zip behaviour
@@ -125,6 +125,23 @@ class BackendCentral {
                     const folderName = path.basename(folderPath);
                     const zipName = `${folderName}.zip`;
                     const zipPath = await this._zipFolder(folderPath, destDir, zipName);
+                    
+                    // Resolve destDir to bucketId by extracting bucket name from path
+                    // destDir is typically /path/to/bucketName, so we extract the last component
+                    const bucketName = path.basename(destDir);
+                    const dbRes = await this.db.query('SELECT id FROM "Bucket" WHERE name = $1', [bucketName]);
+                    
+                    if (dbRes.rows.length > 0) {
+                        const bucketId = dbRes.rows[0].id;
+                        // Delete old zip from S3 if exists
+                        await this.delete.deleteFromS3(bucketId, zipName);
+                        // Upload new zip to S3
+                        this.queue.addUploadTask(bucketId, zipPath, zipName, 'application/zip', null);
+                        console.log(`[Backend] Queued zip upload: ${zipName} → s3://${bucketId}/${zipName}`);
+                    } else {
+                        console.log(`[Backend] Bucket not found for destDir: ${destDir}`);
+                    }
+                    
                     results.push({ success: true, path: zipPath });
                 } catch (err) {
                     console.error(`[Backend] Zip failed for ${folderPath}:`, err);

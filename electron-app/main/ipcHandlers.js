@@ -266,8 +266,8 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
           const mapId =
             "map-" + Date.now() + Math.random().toString(36).substring(7);
           await backend.db.query(
-            `INSERT INTO "SyncMapping" (id, "configId", "localPath", "bucketId") VALUES ($1, $2, $3, $4)`,
-            [mapId, id, map.localPath, map.bucketId],
+            `INSERT INTO "SyncMapping" (id, "configId", "localPath", "bucketId", "shouldZip") VALUES ($1, $2, $3, $4, $5)`,
+            [mapId, id, map.localPath, map.bucketId, map.shouldZip ? 1 : 0],
           );
 
           // Only add to watcher for UPLOAD configs with watcher enabled

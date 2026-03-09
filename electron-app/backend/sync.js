@@ -220,6 +220,29 @@ class SyncManager {
         }
     }
 
+    /**
+     * Fetch live remote file listing from Parent DB API for a specific bucket.
+     * Returns array of { key, size, eTag, ... } objects.
+     * Returns null on failure (network error, 401) to signal fallback to local DB.
+     */
+    async fetchRemoteFiles(bucketId) {
+        try {
+            const response = await axios.get(`${API_URL}/agent/sync?bucketId=${bucketId}`, {
+                headers: { Authorization: `Bearer ${this.authToken}` }
+            });
+
+            if (response.data && response.data.buckets && response.data.buckets.length > 0) {
+                const bucket = response.data.buckets[0];
+                return bucket.files || [];
+            }
+
+            return []; // Bucket exists but has no files
+        } catch (err) {
+            console.warn(`[SyncManager] Parent DB API unreachable for bucket ${bucketId}:`, err.message);
+            return null; // Signal fallback to local DB
+        }
+    }
+
     async syncConfigs() {
         // Auto-release stale locks: if isSyncing=1 but lastSync is >30 min ago,
         // the app likely crashed mid-sync. Force-release to unblock.
@@ -266,14 +289,31 @@ class SyncManager {
             try {
                 const mappings = database.query('SELECT * FROM "SyncMapping" WHERE "configId" = $1', [config.id]);
                 for (const map of mappings.rows) {
-                    const filesQuery = database.query('SELECT * FROM "FileObject" WHERE "bucketId" = $1', [map.bucketId]);
                     const bucketNameResult = database.query('SELECT name FROM "Bucket" WHERE id = $1', [map.bucketId]);
+                    const bucketName = bucketNameResult.rows[0]?.name;
+                    if (!bucketName) continue;
+
+                    let bucketFiles;
+                    if (direction === 'UPLOAD') {
+                        // UPLOAD mode: fetch live remote listing from Parent DB API
+                        bucketFiles = await this.fetchRemoteFiles(map.bucketId);
+                        if (bucketFiles === null) {
+                            // Fallback to local DB on API failure
+                            console.warn(`[SyncManager] Parent DB API unreachable, falling back to local DB for bucket ${map.bucketId}`);
+                            const filesQuery = database.query('SELECT * FROM "FileObject" WHERE "bucketId" = $1', [map.bucketId]);
+                            bucketFiles = filesQuery.rows;
+                        }
+                    } else {
+                        // DOWNLOAD mode: use local DB (unchanged)
+                        const filesQuery = database.query('SELECT * FROM "FileObject" WHERE "bucketId" = $1', [map.bucketId]);
+                        bucketFiles = filesQuery.rows;
+                    }
+
                     const bucketMock = {
                         id: map.bucketId,
-                        name: bucketNameResult.rows[0]?.name,
-                        files: filesQuery.rows
+                        name: bucketName,
+                        files: bucketFiles
                     };
-                    if (!bucketMock.name) continue;
 
                     if (direction === 'DOWNLOAD') {
                         // Download mode: mirror + preserve (never delete local files)
@@ -480,7 +520,8 @@ class SyncManager {
         };
 
         const localFiles = await walk(rootFolder);
-        const remoteKeys = new Set(bucket.files.map(f => f.key));
+        const remoteFiles = bucket.files || [];
+        const remoteFileMap = new Map(remoteFiles.map(f => [f.key, f]));
 
         let uploadCount = 0;
         const uploadQueue = require('./transfers/queue');
@@ -491,23 +532,17 @@ class SyncManager {
 
             let shouldUpload = false;
 
-            if (!remoteKeys.has(s3Key)) {
+            const remoteFile = remoteFileMap.get(s3Key);
+            if (!remoteFile) {
                 shouldUpload = true; // Missing from S3 entirely
             } else {
-                // Check if local file has been modified since it was last synced
+                // Check if local file size differs from remote file size
                 try {
                     const localStat = fs.statSync(localPath);
-                    const dbFile = database.query('SELECT size, "updatedAt" FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [s3Key, bucket.id]);
-                    const record = dbFile.rows[0];
-                    if (record) {
-                        const sizeMismatched = Array.isArray(record.size) || record.size ? parseInt(record.size) !== localStat.size : false;
-                        const timeMismatched = record.updatedAt ? new Date(record.updatedAt).getTime() < localStat.mtime.getTime() : false;
-                        
-                        if (sizeMismatched || timeMismatched) {
-                            shouldUpload = true;
-                        }
-                    } else {
-                        shouldUpload = true; // Edge case: not in DB but exists
+                    const remoteSize = remoteFile.size ? parseInt(remoteFile.size) : null;
+                    
+                    if (remoteSize !== null && localStat.size !== remoteSize) {
+                        shouldUpload = true; // Size mismatch
                     }
                 } catch(e) {}
             }

@@ -23,7 +23,7 @@ export default function SyncPage() {
     const [newConfigInterval, setNewConfigInterval] = useState(5);
     const [newDirection, setNewDirection] = useState('DOWNLOAD');
     const [newUseWatcher, setNewUseWatcher] = useState(true);
-    const [newMappings, setNewMappings] = useState([]); // {localPath, bucketId}
+    const [newMappings, setNewMappings] = useState([]); // {localPath, bucketId, shouldZip}
 
     // --- Fetchers ---
     const fetchConfigs = async () => {
@@ -97,7 +97,13 @@ export default function SyncPage() {
 
     // --- Modal Actions ---
     const handleAddMapping = () => {
-        setNewMappings([...newMappings, { localPath: '', bucketId: buckets[0]?.id || '' }]);
+        setNewMappings([...newMappings, { localPath: '', bucketId: buckets[0]?.id || '', shouldZip: false }]);
+    };
+
+    const handleToggleMappingZip = (index) => {
+        const updated = [...newMappings];
+        updated[index].shouldZip = !updated[index].shouldZip;
+        setNewMappings(updated);
     };
 
     const handleSelectFolder = async (index) => {
@@ -251,6 +257,11 @@ export default function SyncPage() {
                                                                 Watcher
                                                             </span>
                                                         )}
+                                                        {config.mappings?.some(m => m.shouldZip) && (
+                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-violet-50 text-violet-600">
+                                                                📦 Zip
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -265,7 +276,10 @@ export default function SyncPage() {
                                             <div className="text-xs font-semibold text-slate-500 mb-1">MAPPED FOLDERS ({config.mappings?.length || 0})</div>
                                             {config.mappings?.map(map => (
                                                 <div key={map.id} className="text-xs flex flex-col gap-0.5 text-slate-700 bg-white p-2 rounded border border-slate-100 shadow-sm">
-                                                    <div className="font-medium truncate tracking-tight text-[11px] text-blue-600">S3: {buckets.find(b=>b.id === map.bucketId)?.name || map.bucketId}</div>
+                                                    <div className="font-medium truncate tracking-tight text-[11px] text-blue-600 flex items-center gap-1">
+                                                        S3: {buckets.find(b=>b.id === map.bucketId)?.name || map.bucketId}
+                                                        {map.shouldZip && <span className="text-[9px] bg-violet-100 text-violet-600 px-1 py-0.5 rounded font-bold">ZIP</span>}
+                                                    </div>
                                                     <div className="truncate text-slate-500" title={map.localPath}>Local: {map.localPath}</div>
                                                 </div>
                                             ))}
@@ -476,6 +490,28 @@ export default function SyncPage() {
                                                     Browse
                                                 </Button>
                                             </div>
+                                            {/* Zip toggle — only shown for UPLOAD configs */}
+                                            {newDirection === 'UPLOAD' && (
+                                                <div className="flex items-center gap-2 pt-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleToggleMappingZip(idx)}
+                                                        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                                                            mapping.shouldZip ? 'bg-violet-600' : 'bg-slate-300'
+                                                        }`}
+                                                    >
+                                                        <span className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                                            mapping.shouldZip ? 'translate-x-4' : 'translate-x-0'
+                                                        }`} />
+                                                    </button>
+                                                    <span className="text-xs text-slate-600">
+                                                        {mapping.shouldZip
+                                                            ? <span className="font-medium text-violet-700">Zip folder before upload — folder will be compressed into a .zip and uploaded as a single file</span>
+                                                            : <span className="text-slate-400">Upload files individually (no zip)</span>
+                                                        }
+                                                    </span>
+                                                </div>
+                                            )}
                                         </div>
                                         <button type="button" onClick={() => handleDeleteMapping(idx)} className="p-1.5 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded mt-0.5 transition-colors">
                                             <Trash2 className="h-4 w-4" />

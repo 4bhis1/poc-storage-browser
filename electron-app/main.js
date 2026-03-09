@@ -197,6 +197,7 @@ app.whenReady().then(async () => {
   // Shared guard sets
   const uploadInProgress = new Set(); // prevent concurrent re-upload of same file
   const downloadingPaths = new Set(); // files being downloaded by SyncManager — watcher must skip these
+  const zipDebounceTimers = new Map(); // debounce re-zip operations per source folder
 
   backend.sync.addWatcherPath = (folderPath, useWatcher = true) => {
     if (watcher && useWatcher) {
@@ -204,6 +205,73 @@ app.whenReady().then(async () => {
         watcher.add(folderPath);
     }
   };
+
+  /**
+   * Check if a file path is inside a zip-mapped source folder.
+   * Returns { shouldZip: true, sourcePath, destDir, bucketId, zipName } if yes, null otherwise.
+   */
+  async function getZipMapping(filePath) {
+    try {
+      const mappings = await backend.db.query(
+        'SELECT m."localPath", m."bucketId", m."shouldZip" FROM "SyncMapping" m WHERE m."shouldZip" = 1'
+      );
+      for (const mapping of mappings.rows) {
+        if (filePath.startsWith(mapping.localPath)) {
+          // This file is inside a zip-mapped source folder
+          const folderName = path.basename(mapping.localPath);
+          const zipName = `${folderName}.zip`;
+          // destDir is the parent of the source folder (where zip will be written)
+          const destDir = path.dirname(mapping.localPath);
+          return {
+            shouldZip: true,
+            sourcePath: mapping.localPath,
+            destDir,
+            bucketId: mapping.bucketId,
+            zipName,
+          };
+        }
+      }
+    } catch (e) {
+      console.error('[Watcher] Failed to check zip mappings:', e.message);
+    }
+    return null;
+  }
+
+  /**
+   * Debounced re-zip handler: waits 2 seconds after last change before re-zipping.
+   */
+  async function handleZipSourceChange(zipMapping) {
+    const { sourcePath, destDir, bucketId, zipName } = zipMapping;
+    
+    // Clear existing timer for this source folder
+    if (zipDebounceTimers.has(sourcePath)) {
+      clearTimeout(zipDebounceTimers.get(sourcePath));
+    }
+
+    // Set new timer: re-zip after 2 seconds of inactivity
+    const timer = setTimeout(async () => {
+      try {
+        console.log(`[Watcher] Re-zipping folder: ${sourcePath} → ${zipName}`);
+        
+        // Create new zip
+        const zipPath = await backend._zipFolder(sourcePath, destDir, zipName);
+        
+        // Delete old zip from S3
+        await backend.delete.deleteFromS3(bucketId, zipName);
+        
+        // Upload new zip to S3
+        backend.queue.addUploadTask(bucketId, zipPath, zipName, 'application/zip', null);
+        
+        console.log(`[Watcher] Re-zip complete: ${zipName} → s3://${bucketId}/${zipName}`);
+      } catch (e) {
+        console.error(`[Watcher] Re-zip failed for ${sourcePath}:`, e.message);
+      } finally {
+        zipDebounceTimers.delete(sourcePath);
+      }
+    }, 2000);
+
+    zipDebounceTimers.set(sourcePath, timer);
+  }
 
   watcher
     .on('add', async (filePath) => {
@@ -230,9 +298,38 @@ app.whenReady().then(async () => {
         uploadInProgress.delete(filePath);
       }
     })
-    .on('change', (filePath) => {
-      // Just notify UI — awaitWriteFinish means 'add' already handled the stable version
+    .on('change', async (filePath) => {
+      // Notify UI
       if (mainWindow) mainWindow.webContents.send('file-change', filePath);
+
+      // Skip files being downloaded by SyncManager
+      if (downloadingPaths.has(filePath)) {
+        console.log(`[Watcher] Skipping sync-download file on change: ${path.basename(filePath)}`);
+        return;
+      }
+
+      // Check if this file is inside a zip-mapped source folder
+      const zipMapping = await getZipMapping(filePath);
+      if (zipMapping) {
+        console.log(`[Watcher] File change in zip-mapped folder: ${path.basename(filePath)}`);
+        await handleZipSourceChange(zipMapping);
+        return;
+      }
+
+      // Skip if already uploading
+      if (uploadInProgress.has(filePath)) {
+        console.log(`[Watcher] Skipping duplicate upload on change for: ${path.basename(filePath)}`);
+        return;
+      }
+
+      uploadInProgress.add(filePath);
+      try {
+        await backend.onLocalFileAdded(filePath, ROOT_PATH);
+      } catch (e) {
+        console.error('[Watcher] Re-upload on change failed:', e.message);
+      } finally {
+        uploadInProgress.delete(filePath);
+      }
     })
     .on('unlink', async (filePath) => {
       if (mainWindow) mainWindow.webContents.send('file-unlink', filePath);
