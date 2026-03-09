@@ -6,8 +6,8 @@
   "homepage": "https://cloudvault.app",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && electron .\"",
+    "start": "electron .  --no-sandbox",
+    "dev": "concurrently -k \"vite\" \"wait-on tcp:5173 && npm start\"",
     "build:renderer": "vite build",
     "build:linux": "npm run build:renderer && electron-builder --linux",
     "build:win": "npm run build:renderer && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --win",

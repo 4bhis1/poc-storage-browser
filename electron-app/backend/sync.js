@@ -100,7 +100,7 @@ class SyncManager {
         // Build incremental sync param — pass lastSyncedAt if we have one
         let lastSyncRow = { rows: [] };
         try {
-            lastSyncRow = await database.query(
+            lastSyncRow = database.query(
                 `SELECT value FROM "KVStore" WHERE key = 'lastFullSyncAt' LIMIT 1`
             );
         } catch (err) {
@@ -113,58 +113,102 @@ class SyncManager {
             headers: { Authorization: `Bearer ${this.authToken}` }
         });
 
-        const { tenants, accounts, syncedAt } = response.data;
+        const { tenants, accounts, buckets, syncedAt } = response.data;
+
+        console.log(`[SyncManager] syncAll response — tenants: ${(tenants||[]).length}, accounts: ${(accounts||[]).length}, buckets: ${(buckets||[]).length}, syncedAt: ${syncedAt}`);
 
         // 1. Sync Tenants into local DB
         for (const tenant of (tenants || [])) {
-            await database.query(`
-                INSERT INTO "Tenant" (id, name, "updatedAt")
-                VALUES ($1, $2, $3)
-                ON CONFLICT (id) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    "updatedAt" = EXCLUDED."updatedAt"
-            `, [tenant.id, tenant.name, tenant.updatedAt || new Date().toISOString()]);
+            try {
+                database.query(`
+                    INSERT INTO "Tenant" (id, name, "updatedAt")
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        "updatedAt" = EXCLUDED."updatedAt"
+                `, [tenant.id, tenant.name, tenant.updatedAt || new Date().toISOString()]);
+                console.log(`[SyncManager] Tenant upserted: ${tenant.name} (${tenant.id})`);
+            } catch (err) {
+                console.error(`[SyncManager] Tenant upsert failed for "${tenant.name}":`, err.message);
+            }
         }
 
-        // 2. Sync Accounts — NO raw IAM credentials stored locally.
-        //    Agent uses /api/agent/credentials for short-lived STS tokens.
+        // 2. Sync Accounts (if present in response)
         for (const account of (accounts || [])) {
-            await database.query(`
-                INSERT INTO "Account" (id, name, "tenantId", "updatedAt")
-                VALUES ($1, $2, $3, $4)
-                ON CONFLICT (id) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    "updatedAt" = EXCLUDED."updatedAt"
-            `, [
-                account.id, account.name,
-                account.tenantId,
-                account.updatedAt || new Date().toISOString()
-            ]);
+            try {
+                const tenantExists = database.query(`SELECT id FROM "Tenant" WHERE id = $1`, [account.tenantId]);
+                if (tenantExists.rows.length === 0) {
+                    database.query(`
+                        INSERT INTO "Tenant" (id, name, "updatedAt") VALUES ($1, $2, $3)
+                        ON CONFLICT (id) DO NOTHING
+                    `, [account.tenantId, account.tenantId, new Date().toISOString()]);
+                }
+                database.query(`
+                    INSERT INTO "Account" (id, name, "tenantId", "updatedAt")
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        "updatedAt" = EXCLUDED."updatedAt"
+                `, [account.id, account.name, account.tenantId, account.updatedAt || new Date().toISOString()]);
+                console.log(`[SyncManager] Account upserted: ${account.name}`);
+            } catch (err) {
+                console.error(`[SyncManager] Account upsert failed for "${account.name}":`, err.message);
+            }
+        }
 
-            console.log(`[SyncManager] Account synced: ${account.name}`);
+        // 3. Sync top-level buckets (API returns buckets directly, not nested under accounts)
+        //    Buckets have tenantId — use it to resolve/create a synthetic accountId.
+        for (const bucket of (buckets || [])) {
+            try {
+                // Derive accountId: use awsAccountId if present, else fall back to tenantId
+                // so the Bucket FK to Account is satisfied.
+                const accountId = bucket.awsAccountId || bucket.accountId || bucket.tenantId;
 
-            // 3. For each bucket — upsert metadata to local DB
-            for (const bucket of (account.buckets || [])) {
+                // Ensure a matching Account row exists (synthetic if needed)
+                const accountExists = database.query(`SELECT id FROM "Account" WHERE id = $1`, [accountId]);
+                if (accountExists.rows.length === 0) {
+                    // Ensure tenant exists first
+                    const tenantId = bucket.tenantId;
+                    if (tenantId) {
+                        database.query(`
+                            INSERT INTO "Tenant" (id, name, "updatedAt") VALUES ($1, $2, $3)
+                            ON CONFLICT (id) DO NOTHING
+                        `, [tenantId, tenantId, new Date().toISOString()]);
+                    }
+                    database.query(`
+                        INSERT INTO "Account" (id, name, "tenantId", "updatedAt")
+                        VALUES ($1, $2, $3, $4)
+                        ON CONFLICT (id) DO NOTHING
+                    `, [accountId, accountId, tenantId || accountId, new Date().toISOString()]);
+                    console.log(`[SyncManager] Synthetic account created for bucket "${bucket.name}": ${accountId}`);
+                }
+
+                bucket.accountId = accountId;
                 await this.upsertBucketMetadata(bucket);
+                console.log(`[SyncManager] Bucket upserted: ${bucket.name} (${bucket.id})`);
+            } catch (err) {
+                console.error(`[SyncManager] Bucket upsert failed for "${bucket.name}":`, err.message);
             }
         }
 
         // 4. Persist the server-returned syncedAt for next incremental sync
         if (syncedAt) {
-            await database.query(`
-                INSERT INTO "KVStore" (key, value) VALUES ('lastFullSyncAt', $1)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            `, [syncedAt]).catch(() => {
+            try {
+                database.query(`
+                    INSERT INTO "KVStore" (key, value) VALUES ('lastFullSyncAt', $1)
+                    ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                `, [syncedAt]);
+            } catch (err) {
                 // KVStore table may not exist on older installs — non-fatal
                 console.warn('[SyncManager] Could not persist lastFullSyncAt — KVStore table missing?');
-            });
+            }
         }
     }
 
     async syncConfigs() {
         // Auto-release stale locks: if isSyncing=1 but lastSync is >30 min ago,
         // the app likely crashed mid-sync. Force-release to unblock.
-        await database.query(`
+        database.query(`
             UPDATE "SyncConfig"
             SET "isSyncing" = 0
             WHERE "isSyncing" = 1
@@ -173,7 +217,7 @@ class SyncManager {
         `);
 
         // Read configs that need sync (respecting interval)
-        const configs = await database.query(`
+        const configs = database.query(`
             SELECT * FROM "SyncConfig" 
             WHERE "isActive" = 1 AND "isSyncing" = 0 AND
             ("lastSync" IS NULL OR "lastSync" < datetime('now', '-' || "intervalMinutes" || ' minutes'))
@@ -181,7 +225,7 @@ class SyncManager {
 
         for (const config of configs.rows) {
             // Per-config lock — double-check it's still unlocked before acquiring
-            const preCheck = await database.query(
+            const preCheck = database.query(
                 `SELECT id FROM "SyncConfig" WHERE id = $1 AND "isSyncing" = 0`,
                 [config.id]
             );
@@ -189,7 +233,7 @@ class SyncManager {
                 console.log(`[SyncManager] Config "${config.name}" is already syncing, skipping.`);
                 continue;
             }
-            await database.query(
+            database.query(
                 `UPDATE "SyncConfig" SET "isSyncing" = 1 WHERE id = $1 AND "isSyncing" = 0`,
                 [config.id]
             );
@@ -198,19 +242,20 @@ class SyncManager {
             console.log(`[SyncManager] Running scheduled sync config: ${config.name} (direction: ${direction})`);
             
             const jobId = 'job-' + Date.now();
-            await database.query(
+            database.query(
                 `INSERT INTO "SyncJob" (id, "configId", status, "startTime") VALUES ($1, $2, $3, datetime('now'))`,
                 [jobId, config.id, 'RUNNING']
             );
 
             let filesHandled = 0;
             try {
-                const mappings = await database.query('SELECT * FROM "SyncMapping" WHERE "configId" = $1', [config.id]);
+                const mappings = database.query('SELECT * FROM "SyncMapping" WHERE "configId" = $1', [config.id]);
                 for (const map of mappings.rows) {
-                    const filesQuery = await database.query('SELECT * FROM "FileObject" WHERE "bucketId" = $1', [map.bucketId]);
+                    const filesQuery = database.query('SELECT * FROM "FileObject" WHERE "bucketId" = $1', [map.bucketId]);
+                    const bucketNameResult = database.query('SELECT name FROM "Bucket" WHERE id = $1', [map.bucketId]);
                     const bucketMock = {
                         id: map.bucketId,
-                        name: (await database.query('SELECT name FROM "Bucket" WHERE id = $1', [map.bucketId])).rows[0]?.name,
+                        name: bucketNameResult.rows[0]?.name,
                         files: filesQuery.rows
                     };
                     if (!bucketMock.name) continue;
@@ -225,19 +270,19 @@ class SyncManager {
                         filesHandled += ul;
                     }
                 }
-                await database.query(
+                database.query(
                     `UPDATE "SyncJob" SET status = $1, "endTime" = datetime('now'), "filesHandled" = $2 WHERE id = $3`,
                     ['COMPLETED', filesHandled, jobId]
                 );
             } catch (err) {
                 console.error(`[SyncManager] SyncJob ${jobId} failed:`, err);
-                await database.query(
+                database.query(
                     `UPDATE "SyncJob" SET status = $1, "endTime" = datetime('now'), error = $2 WHERE id = $3`,
                     ['FAILED', err.message, jobId]
                 );
             } finally {
                 // Always release the lock
-                await database.query(`UPDATE "SyncConfig" SET "isSyncing" = 0, "lastSync" = datetime('now') WHERE id = $1`, [config.id]);
+                database.query(`UPDATE "SyncConfig" SET "isSyncing" = 0, "lastSync" = datetime('now') WHERE id = $1`, [config.id]);
             }
         }
     }
@@ -248,7 +293,7 @@ class SyncManager {
 
     async upsertBucketMetadata(bucket) {
         // Upsert bucket record into local DB
-        await database.query(`
+        database.query(`
             INSERT INTO "Bucket" (id, name, region, "accountId", "updatedAt")
             VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (id) DO UPDATE SET
@@ -260,32 +305,35 @@ class SyncManager {
         const files = bucket.files || [];
         for (const file of files) {
             if (!file.key) continue;
-
-            // Upsert FileObject into local DB so search works
-            await database.query(`
-                INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt", "remoteEtag")
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, datetime('now'), $9)
-                ON CONFLICT (id) DO UPDATE SET
-                    name = EXCLUDED.name,
-                    key = EXCLUDED.key,
-                    "isFolder" = EXCLUDED."isFolder",
-                    size = EXCLUDED.size,
-                    "mimeType" = EXCLUDED."mimeType",
-                    "updatedAt" = EXCLUDED."updatedAt",
-                    "remoteEtag" = EXCLUDED."remoteEtag",
-                    "isSynced" = 1,
-                    "lastSyncedAt" = datetime('now')
-            `, [
-                file.id || `${bucket.id}-${file.key}`,
-                file.name || file.key.split('/').pop() || file.key,
-                file.key,
-                file.isFolder ? 1 : 0,
-                file.size || null,
-                file.mimeType || null,
-                bucket.id,
-                file.updatedAt || new Date().toISOString(),
-                file.eTag || file.etag || null
-            ]);
+            try {
+                // Upsert FileObject into local DB so search works
+                database.query(`
+                    INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt", "remoteEtag")
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, datetime('now'), $9)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        key = EXCLUDED.key,
+                        "isFolder" = EXCLUDED."isFolder",
+                        size = EXCLUDED.size,
+                        "mimeType" = EXCLUDED."mimeType",
+                        "updatedAt" = EXCLUDED."updatedAt",
+                        "remoteEtag" = EXCLUDED."remoteEtag",
+                        "isSynced" = 1,
+                        "lastSyncedAt" = datetime('now')
+                `, [
+                    file.id || `${bucket.id}-${file.key}`,
+                    file.name || file.key.split('/').pop() || file.key,
+                    file.key,
+                    file.isFolder ? 1 : 0,
+                    file.size || null,
+                    file.mimeType || null,
+                    bucket.id,
+                    file.updatedAt || new Date().toISOString(),
+                    file.eTag || file.etag || null
+                ]);
+            } catch (err) {
+                console.error(`[SyncManager] FileObject upsert failed for key "${file.key}":`, err.message);
+            }
         }
     }
 
@@ -303,7 +351,7 @@ class SyncManager {
             if (!file.key) continue;
 
             // Upsert FileObject into local DB so search works
-            await database.query(`
+            database.query(`
                 INSERT INTO "FileObject" (id, name, key, "isFolder", size, "mimeType", "bucketId", "updatedAt", "isSynced", "lastSyncedAt", "remoteEtag")
                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, datetime('now'), $9)
                 ON CONFLICT (id) DO UPDATE SET
@@ -346,7 +394,7 @@ class SyncManager {
                 const localStat = fs.statSync(localFilePath);
                 
                 // Get the DB record for the local file's known ETag
-                const dbFile = await database.query('SELECT "localEtag" FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [file.key, bucket.id]);
+                const dbFile = database.query('SELECT "localEtag" FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [file.key, bucket.id]);
                 const localEtagSaved = dbFile.rows[0]?.localEtag;
                 
                 const rawRemoteEtag = file.eTag || file.etag;
@@ -363,7 +411,7 @@ class SyncManager {
                             const newLocalHash = await this._computeFileHash(localFilePath);
                             if (newLocalHash === remoteEtag) {
                                 isMatch = true;
-                                await database.query('UPDATE "FileObject" SET "localEtag" = $1 WHERE key = $2 AND "bucketId" = $3', [newLocalHash, file.key, bucket.id]);
+                                database.query('UPDATE "FileObject" SET "localEtag" = $1 WHERE key = $2 AND "bucketId" = $3', [newLocalHash, file.key, bucket.id]);
                             } else {
                                 isMatch = false; // Size matched but contents changed
                             }
@@ -433,7 +481,7 @@ class SyncManager {
                 // Check if local file has been modified since it was last synced
                 try {
                     const localStat = fs.statSync(localPath);
-                    const dbFile = await database.query('SELECT size, "updatedAt" FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [s3Key, bucket.id]);
+                    const dbFile = database.query('SELECT size, "updatedAt" FROM "FileObject" WHERE key = $1 AND "bucketId" = $2', [s3Key, bucket.id]);
                     const record = dbFile.rows[0];
                     if (record) {
                         const sizeMismatched = Array.isArray(record.size) || record.size ? parseInt(record.size) !== localStat.size : false;
@@ -487,7 +535,7 @@ class SyncManager {
             // Calculate local ETag after download for future sync comparisons
             try {
                 const downloadedHash = await this._computeFileHash(localFilePath);
-                await database.query(
+                database.query(
                     'UPDATE "FileObject" SET "localEtag" = $1 WHERE key = $2 AND "bucketId" = $3',
                     [downloadedHash, file.key, bucket.id]
                 );
@@ -521,4 +569,3 @@ class SyncManager {
 
 module.exports = new SyncManager();
 
-module.exports = new SyncManager();

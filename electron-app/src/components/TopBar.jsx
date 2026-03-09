@@ -216,20 +216,28 @@ const TopBar = () => {
                 {/* User Profile */}
                 <div className="flex items-center gap-1 relative" ref={profileRef}>
                     {isBot ? (
-                        <div
-                            className="h-9 w-9 bg-amber-100 text-amber-700 font-bold rounded-full flex items-center justify-center shadow-sm cursor-pointer border border-amber-300/60"
-                            title={botName || 'Bot Agent'}
+                        <button
+                            className="flex items-center gap-2 pl-1 pr-3 py-1 bg-amber-50 border border-amber-200/60 rounded-full hover:bg-amber-100 transition-all cursor-pointer shadow-sm"
+                            title={botName || 'Service Agent'}
                             onClick={() => setShowProfile(v => !v)}
                         >
-                            <Bot className="h-4 w-4" />
-                        </div>
+                            <div className="h-7 w-7 bg-amber-100 text-amber-700 rounded-full flex items-center justify-center border border-amber-300/60 shrink-0">
+                                <Bot className="h-4 w-4" />
+                            </div>
+                            <span className="text-xs font-semibold text-amber-800 max-w-[120px] truncate">{botName || user?.name || 'Service Agent'}</span>
+                            <ChevronDown className="h-3 w-3 text-amber-500 shrink-0" />
+                        </button>
                     ) : (
-                        <div 
-                            className="h-9 w-9 bg-purple-100 text-purple-700 font-bold rounded-full flex items-center justify-center text-sm shadow-sm cursor-pointer border border-purple-200/60 hover:ring-2 hover:ring-purple-300/50 transition-all"
+                        <button
+                            className="flex items-center gap-2 pl-1 pr-3 py-1 bg-white border border-slate-200/60 rounded-full hover:bg-slate-50 transition-all cursor-pointer shadow-sm"
                             onClick={() => setShowProfile(v => !v)}
                         >
-                            {(user?.name || 'A').charAt(0).toUpperCase()}
-                        </div>
+                            <div className="h-7 w-7 bg-purple-100 text-purple-700 font-bold rounded-full flex items-center justify-center text-sm border border-purple-200/60 shrink-0">
+                                {(user?.name || 'A').charAt(0).toUpperCase()}
+                            </div>
+                            <span className="text-xs font-semibold text-slate-700 max-w-[120px] truncate">{user?.name || user?.email || 'User'}</span>
+                            <ChevronDown className="h-3 w-3 text-slate-400 shrink-0" />
+                        </button>
                     )}
 
                     {/* Profile Popover */}
@@ -285,7 +293,7 @@ const TopBar = () => {
                             <div className="border-t border-slate-100 px-4 py-2.5">
                                 <button
                                     onClick={() => { setShowProfile(false); logout(); }}
-                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-red-600 hover:bg-red-50 transition-colors"
+                                    className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-sm text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
                                 >
                                     <LogOut className="h-3.5 w-3.5" />
                                     Sign out
