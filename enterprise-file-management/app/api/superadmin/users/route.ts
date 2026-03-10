@@ -15,12 +15,40 @@ export async function GET() {
         isHubTenant: false,
       },
     },
-    include: {
-      tenant: { select: { name: true } },
-    },
     orderBy: { createdAt: "desc" },
   });
-  return NextResponse.json(users);
+
+  const grouped = users.reduce((acc: Record<string, any>, curr) => {
+    const email = curr.email.toLowerCase();
+    if (!acc[email]) {
+      acc[email] = {
+        id: curr.id,
+        email: curr.email,
+        name: curr.name,
+        roles: [curr.role],
+        tenantsCount: 1,
+        isActive: curr.isActive,
+        createdAt: curr.createdAt,
+      };
+    } else {
+      // Aggregate name if missing
+      if (!acc[email].name && curr.name) acc[email].name = curr.name;
+      // Aggregate roles
+      if (!acc[email].roles.includes(curr.role))
+        acc[email].roles.push(curr.role);
+      // Increment tenants
+      acc[email].tenantsCount += 1;
+      // isActive if any assigned tenant is active
+      if (curr.isActive) acc[email].isActive = true;
+      // Earliest registration as joined date
+      if (new Date(curr.createdAt) < new Date(acc[email].createdAt)) {
+        acc[email].createdAt = curr.createdAt;
+      }
+    }
+    return acc;
+  }, {});
+
+  return NextResponse.json(Object.values(grouped));
 }
 
 export async function POST(request: Request) {

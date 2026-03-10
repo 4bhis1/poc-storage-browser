@@ -14,6 +14,7 @@ import { Role } from "@/lib/generated/prisma/client";
 import { revalidatePath } from "next/cache";
 import { logAudit } from "@/lib/audit";
 import { extractIpFromHeaders } from "@/lib/ip-whitelist";
+import { getHubTenantId } from "@/lib/hub-tenant";
 
 export async function getUsers() {
   try {
@@ -27,11 +28,24 @@ export async function getUsers() {
         isHubTenant: false,
       },
     };
-    if (currentUser.role !== "PLATFORM_ADMIN") {
+
+    const hubTenantId = await getHubTenantId();
+    if (currentUser.role === "PLATFORM_ADMIN") {
+      // Platform admin sees users of the currently active tenant
+      if (
+        currentUser.activeTenantId &&
+        currentUser.activeTenantId !== hubTenantId
+      ) {
+        whereClause.tenantId = currentUser.activeTenantId;
+      }
+    } else {
+      // Tenant admin/teammate only sees their own tenant's users
+      // AND we explicitly exclude PLATFORM_ADMIN users for security
       if (!currentUser.tenantId) {
         return { success: false, error: "Unauthorized" };
       }
       whereClause.tenantId = currentUser.tenantId;
+      whereClause.role = { not: "PLATFORM_ADMIN" };
     }
 
     const users = await prisma.user.findMany({
@@ -64,6 +78,10 @@ export async function inviteUser(formData: FormData) {
 
   if (!email || !role || !tenantId) {
     return { success: false, error: "Missing required fields" };
+  }
+
+  if (role === "PLATFORM_ADMIN" || role === "TEAM_ADMIN") {
+    return { success: false, error: "Cannot assign restricted roles" };
   }
 
   try {
@@ -130,6 +148,10 @@ export async function updateUserRole(userId: string, newRole: Role) {
       return { success: false, error: "User not found" };
     }
 
+    if (newRole === "PLATFORM_ADMIN" || newRole === "TEAM_ADMIN") {
+      return { success: false, error: "Cannot assign restricted roles" };
+    }
+
     if (currentUser.role !== "PLATFORM_ADMIN") {
       if (
         currentUser.role !== "TENANT_ADMIN" ||
@@ -165,7 +187,7 @@ export async function updateUserRole(userId: string, newRole: Role) {
       action: "USER_UPDATED",
       resource: "User",
       resourceId: userId,
-      details: { oldRole: targetUser.role, newRole },
+      details: { email: targetUser.email, oldRole: targetUser.role, newRole },
       status: "SUCCESS",
       ipAddress: await extractIpFromHeaders(),
     });
@@ -187,6 +209,10 @@ export async function createUserWithPassword(formData: FormData) {
 
   if (!email || !role || !tenantId || !password) {
     return { success: false, error: "Missing required fields" };
+  }
+
+  if (role === "PLATFORM_ADMIN" || role === "TEAM_ADMIN") {
+    return { success: false, error: "Cannot assign restricted roles" };
   }
 
   try {
@@ -286,7 +312,7 @@ export async function toggleUserStatus(userId: string, isActive: boolean) {
       action: "USER_UPDATED",
       resource: "User",
       resourceId: userId,
-      details: { isActive },
+      details: { email: targetUser.email, isActive },
       status: "SUCCESS",
       ipAddress: await extractIpFromHeaders(),
     });

@@ -5,10 +5,17 @@ export async function fetchWithAuth(
   // Inject current token
   const token =
     typeof window !== "undefined" ? localStorage.getItem("accessToken") : null;
+  const activeTenantId =
+    typeof window !== "undefined"
+      ? localStorage.getItem("activeTenantId")
+      : null;
 
   const headers = new Headers(options.headers);
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
+  }
+  if (activeTenantId) {
+    headers.set("x-active-tenant-id", activeTenantId);
   }
 
   const modifiedOptions: RequestInit = {

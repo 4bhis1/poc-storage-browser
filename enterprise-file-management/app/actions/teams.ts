@@ -2,6 +2,7 @@
 
 import prisma from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/session";
+import { getHubTenantId } from "@/lib/hub-tenant";
 
 export async function getTeams() {
   try {
@@ -10,11 +11,19 @@ export async function getTeams() {
       return { success: false, error: "Unauthorized" };
     }
 
-    // Platform admin can see all teams (or could filter by tenant if supported)
-    // Tenant admin should only see their tenant's teams
+    const hubTenantId = await getHubTenantId();
     let whereClause = {};
-    if (currentUser.role !== "PLATFORM_ADMIN" && currentUser.tenantId) {
+    if (currentUser.role === "PLATFORM_ADMIN") {
+      const effectiveTenantId = currentUser.activeTenantId;
+      if (effectiveTenantId && effectiveTenantId !== hubTenantId) {
+        whereClause = { tenantId: effectiveTenantId };
+      } else {
+        whereClause = { tenant: { isHubTenant: false } };
+      }
+    } else if (currentUser.tenantId) {
       whereClause = { tenantId: currentUser.tenantId };
+    } else {
+      return { success: false, error: "Unauthorized" };
     }
 
     const teams = await prisma.team.findMany({

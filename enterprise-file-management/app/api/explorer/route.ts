@@ -40,8 +40,15 @@ export async function GET(request: NextRequest) {
       }
 
       const email = payload.email as string;
+      const activeTenantId =
+        request.headers.get("x-active-tenant-id") ||
+        request.cookies.get("x-active-tenant-id")?.value;
+
       dbUser = await prisma.user.findFirst({
-        where: { email },
+        where: {
+          email,
+          ...(activeTenantId ? { tenantId: activeTenantId } : {}),
+        },
         select: {
           id: true,
           tenantId: true,
@@ -53,6 +60,23 @@ export async function GET(request: NextRequest) {
           },
         },
       });
+
+      if (!dbUser) {
+        // Fallback to first available tenant assignment if activeTenantId not found/provided
+        dbUser = await prisma.user.findFirst({
+          where: { email },
+          select: {
+            id: true,
+            tenantId: true,
+            role: true,
+            policies: true,
+            teams: {
+              where: { isDeleted: false },
+              include: { team: { include: { policies: true } } },
+            },
+          },
+        });
+      }
 
       if (!dbUser?.tenantId) {
         return NextResponse.json(
@@ -142,6 +166,8 @@ export async function GET(request: NextRequest) {
     const bucketId = searchParams.get("bucketId");
     const createdBy = searchParams.get("createdBy");
     const typesParam = searchParams.get("types");
+    const dateFrom = searchParams.get("dateFrom");
+    const dateTo = searchParams.get("dateTo");
     const page = parseInt(searchParams.get("page") || "1");
     const limit = parseInt(searchParams.get("limit") || "10");
     const skip = (page - 1) * limit;
@@ -244,6 +270,12 @@ export async function GET(request: NextRequest) {
       if (createdBy) {
         conditions.push(Prisma.sql`f."createdBy" = ${createdBy}`);
       }
+      if (dateFrom) {
+        conditions.push(Prisma.sql`f."createdAt" >= ${new Date(dateFrom)}`);
+      }
+      if (dateTo) {
+        conditions.push(Prisma.sql`f."createdAt" <= ${new Date(dateTo)}`);
+      }
 
       // Apply type filters in the FTS path via raw SQL
       if (typesParam) {
@@ -334,6 +366,13 @@ export async function GET(request: NextRequest) {
         where.bucketId = { in: allowedBucketIdFilter };
       }
       if (createdBy) where.createdBy = createdBy;
+
+      if (dateFrom || dateTo) {
+        where.createdAt = {
+          ...(dateFrom ? { gte: new Date(dateFrom) } : {}),
+          ...(dateTo ? { lte: new Date(dateTo) } : {}),
+        };
+      }
 
       if (typeConditions.length > 0) {
         where.OR = typeConditions;

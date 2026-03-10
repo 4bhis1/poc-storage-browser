@@ -9,6 +9,7 @@ import { getS3Client } from "@/lib/s3";
 import { logAudit } from "@/lib/audit";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 import { verifyBotToken, assertBotBucketAccess } from "@/lib/bot-auth";
+import { ensureParentDirectories } from "@/lib/file-hierarchy";
 
 export async function GET(request: NextRequest) {
   try {
@@ -127,16 +128,32 @@ export async function GET(request: NextRequest) {
     const account = null;
     const awsAccount = bucket.awsAccount;
 
-    // Determine Key
+    // Determine Key and Resolve Hierarchy
     let key: string = paramKey || (name as string);
-    if (!paramKey && parentId && parentId !== "null") {
+    let resolvedParentId = parentId && parentId !== "null" ? parentId : null;
+    let resolvedName = (name as string) || "";
+
+    if (!paramKey && !action) {
+      // For uploads, we might have a path in 'name'. Resolve it.
+      const resolved = await ensureParentDirectories(
+        bucket.id,
+        bucket.tenantId,
+        resolvedName,
+        user.id,
+        resolvedParentId,
+      );
+      resolvedParentId = resolved.parentId;
+      resolvedName = resolved.baseName;
+    }
+
+    if (!paramKey && resolvedParentId) {
       const parent = await prisma.fileObject.findUnique({
-        where: { id: parentId },
+        where: { id: resolvedParentId },
       });
       if (parent) {
         // Ensure parent key doesn't have double slashes if it ends with /
         const prefix = parent.key.endsWith("/") ? parent.key : `${parent.key}/`;
-        key = `${prefix}${name}`;
+        key = `${prefix}${resolvedName}`;
       }
     }
 
@@ -179,17 +196,16 @@ export async function GET(request: NextRequest) {
         where: { id: fileId },
         create: {
           id: fileId,
-          name: name as string,
+          name: resolvedName,
           key,
           isFolder: false,
           size: null,
           mimeType: contentType,
           bucket: { connect: { id: bucket.id } },
           tenant: { connect: { id: bucket.tenantId } },
-          parent:
-            parentId && parentId !== "null"
-              ? { connect: { id: parentId } }
-              : undefined,
+          parent: resolvedParentId
+            ? { connect: { id: resolvedParentId } }
+            : undefined,
         },
         update: {
           mimeType: contentType,

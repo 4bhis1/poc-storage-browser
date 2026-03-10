@@ -9,6 +9,7 @@ import { checkPermission } from "@/lib/rbac";
 import { extractIpFromRequest, validateUserIpAccess } from "@/lib/ip-whitelist";
 import { verifyBotToken, assertBotBucketAccess } from "@/lib/bot-auth";
 import { withTenantAccess } from "@/lib/middleware/tenant-access";
+import { ensureParentDirectories } from "@/lib/file-hierarchy";
 
 export async function GET(request: NextRequest) {
   return withTenantAccess(
@@ -259,26 +260,45 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: "Forbidden" }, { status: 403 });
         }
 
-        let key = name;
-        if (parentId) {
+        const { parentId: resolvedParentId, baseName: resolvedName } =
+          await ensureParentDirectories(
+            bucket.id,
+            bucket.tenantId,
+            name,
+            user.id,
+            parentId,
+          );
+
+        let key = resolvedName;
+        if (resolvedParentId) {
           const parent = await prisma.fileObject.findUnique({
-            where: { id: parentId },
+            where: { id: resolvedParentId },
           });
-          if (parent) key = `${parent.key}/${name}`;
+          if (parent) {
+            const prefix = parent.key.endsWith("/")
+              ? parent.key
+              : `${parent.key}/`;
+            key = `${prefix}${resolvedName}`;
+          }
+        } else {
+          // Root level bucket key calculation
+          key = resolvedName;
         }
 
         if (isFolder) {
+          if (!key.endsWith("/")) {
+            key = `${key}/`;
+          }
           try {
             const s3 = await getS3Client(
               null,
               bucket.region,
               bucket.awsAccount,
             );
-            const s3Key = key.endsWith("/") ? key : `${key}/`;
             await s3.send(
               new PutObjectCommand({
                 Bucket: bucket.name,
-                Key: s3Key,
+                Key: key,
                 Body: "",
               }),
             );
@@ -299,17 +319,19 @@ export async function POST(request: NextRequest) {
             where: { id: fileId },
             create: {
               id: fileId,
-              name,
+              name: resolvedName,
               key,
               isFolder: !!isFolder,
               size: size ? BigInt(size) : null,
               mimeType: mimeType || null,
               bucket: { connect: { id: bucket.id } },
               tenant: { connect: { id: bucket.tenantId } },
-              parent: parentId ? { connect: { id: parentId } } : undefined,
+              parent: resolvedParentId
+                ? { connect: { id: resolvedParentId } }
+                : undefined,
             },
             update: {
-              name,
+              name: resolvedName,
               size: size ? BigInt(size) : null,
               mimeType: mimeType || null,
               updatedAt: new Date(),

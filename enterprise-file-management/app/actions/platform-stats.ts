@@ -47,32 +47,48 @@ export async function getPlatformStats(filters?: PlatformStatsFilters) {
     recentAuditLogs,
     topTenants,
   ] = await Promise.all([
-    prisma.tenant.count({ where: createdAtFilter }),
+    prisma.tenant.count({ where: { isHubTenant: false, ...createdAtFilter } }),
     prisma.user.count({
       where: {
         isActive: true,
         role: { not: "PLATFORM_ADMIN" },
+        tenant: { isHubTenant: false },
         ...createdAtFilter,
       },
     }),
-    prisma.bucket.count({ where: createdAtFilter }),
+    prisma.bucket.count({
+      where: { tenant: { isHubTenant: false }, ...createdAtFilter },
+    }),
     prisma.botIdentity.count({
-      where: { isActive: true, ...createdAtFilter },
+      where: {
+        isActive: true,
+        tenant: { isHubTenant: false },
+        ...createdAtFilter,
+      },
     }),
     prisma.fileObject.aggregate({
-      where: createdAtFilter,
+      where: { tenant: { isHubTenant: false }, ...createdAtFilter },
       _sum: { size: true },
       _count: { id: true },
     }),
-    prisma.awsAccount.groupBy({ by: ["status"], _count: { id: true } }),
+    prisma.awsAccount.groupBy({
+      by: ["status"],
+      where: { tenant: { isHubTenant: false } },
+      _count: { id: true },
+    }),
     prisma.auditLog.findMany({
-      where: createdAtFilter,
+      where: {
+        ...createdAtFilter,
+        // Exclude logs related to system admins/hub if desired,
+        // but typically audit logs are filtered by the 'user' relationship
+        user: { tenant: { isHubTenant: false } },
+      },
       take: 8,
       orderBy: { createdAt: "desc" },
       include: { user: { select: { name: true, email: true } } },
     }),
     prisma.tenant.findMany({
-      where: createdAtFilter,
+      where: { isHubTenant: false, ...createdAtFilter },
       take: 5,
       include: {
         _count: { select: { users: true, buckets: true } },
@@ -84,7 +100,10 @@ export async function getPlatformStats(filters?: PlatformStatsFilters) {
 
   const tenantStorageMap = await prisma.fileObject.groupBy({
     by: ["tenantId"],
-    ...(dateFilter ? { where: { createdAt: dateFilter } } : {}),
+    where: {
+      tenant: { isHubTenant: false },
+      ...(dateFilter ? { createdAt: dateFilter } : {}),
+    },
     _sum: { size: true },
   });
   const storageByTenant = Object.fromEntries(

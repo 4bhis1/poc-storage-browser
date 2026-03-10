@@ -297,9 +297,15 @@ async function ensureParentDirectories(
     currentKey = currentKey ? `${currentKey}/${part}` : part;
     const folderKey = `${currentKey}/`;
 
+    const folderKeyNoSlash = currentKey;
+
     let folder = await prisma.fileObject.findFirst({
-      where: { bucketId, key: folderKey },
-      select: { id: true },
+      where: {
+        bucketId,
+        key: { in: [folderKey, folderKeyNoSlash] },
+        isFolder: true,
+      },
+      select: { id: true, key: true },
     });
 
     if (!folder) {
@@ -320,8 +326,12 @@ async function ensureParentDirectories(
       } catch (err: any) {
         // Handle potential race condition where another invocation created it between our findFirst and create
         folder = await prisma.fileObject.findFirst({
-          where: { bucketId, key: folderKey },
-          select: { id: true },
+          where: {
+            bucketId,
+            key: { in: [folderKey, folderKeyNoSlash] },
+            isFolder: true,
+          },
+          select: { id: true, key: true },
         });
       }
     }
@@ -374,7 +384,7 @@ async function upsertFileObject(
       ipAddress,
     );
   } else {
-    const parentKey = key.split("/").slice(0, -1).join("/");
+    const parentKey = key.split("/").filter(Boolean).slice(0, -1).join("/");
     let parentId: string | null = null;
 
     if (parentKey) {

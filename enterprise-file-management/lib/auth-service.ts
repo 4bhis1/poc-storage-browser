@@ -70,6 +70,12 @@ export async function inviteUserToCognito(
       Username: email,
       UserAttributes: userAttributes,
       DesiredDeliveryMediums: ["EMAIL"],
+      ClientMetadata: {
+        appUrl:
+          process.env.NEXT_PUBLIC_APP_URL ||
+          process.env.ALLOWED_ORIGINS?.split(",")[0] ||
+          "",
+      },
     });
 
     const response = await cognitoClient.send(command);

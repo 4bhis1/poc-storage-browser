@@ -1,9 +1,10 @@
 "use server";
 
 import prisma from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/session";
+import { getCurrentUser, AuthenticatedUser } from "@/lib/session";
 import { checkPermission } from "@/lib/rbac";
 import { Role } from "@/lib/generated/prisma/client";
+import { getHubTenantId } from "@/lib/hub-tenant";
 
 export async function getAuditLogs(filters?: {
   action?: string;
@@ -24,11 +25,12 @@ export async function getAuditLogs(filters?: {
     const limit = filters?.limit || 10;
     const skip = (page - 1) * limit;
 
-    const whereClause: any = {};
+    const andConditions: any[] = [];
+    const hubTenantId = await getHubTenantId();
 
     // ── 1. Tenant/Role Filters ──
     if (user.role === "TENANT_ADMIN") {
-      whereClause.user = { tenantId: user.tenantId };
+      andConditions.push({ user: { tenantId: user.tenantId } });
     } else if (user.role === "TEAMMATE") {
       const userWithPolicies: any = await prisma.user.findUnique({
         where: { id: user.id },
@@ -61,16 +63,28 @@ export async function getAuditLogs(filters?: {
           }));
           teammateOrConditions.push({ OR: bucketOrs });
         }
-        whereClause.OR = teammateOrConditions;
+        andConditions.push({ OR: teammateOrConditions });
       } else {
         // Fallback if no tenant/policies: only see own logs
-        whereClause.userId = user.id;
+        andConditions.push({ userId: user.id });
       }
-    }
+    } else if (user.role === "PLATFORM_ADMIN") {
+      const effectiveTenantId = filters?.tenantId || user.activeTenantId;
 
-    // ── Tenant Filter (PLATFORM_ADMIN only) ──
-    if (user.role === "PLATFORM_ADMIN" && filters?.tenantId) {
-      whereClause.user = { tenantId: filters.tenantId };
+      if (
+        effectiveTenantId &&
+        effectiveTenantId !== hubTenantId &&
+        effectiveTenantId !== "all"
+      ) {
+        andConditions.push({ user: { tenantId: effectiveTenantId } });
+      } else if (effectiveTenantId === hubTenantId) {
+        andConditions.push({ user: { tenantId: hubTenantId } });
+      } else {
+        // Default platform-wide view should exclude hub tenant but include logins (userId null)
+        andConditions.push({
+          OR: [{ userId: null }, { user: { tenant: { isHubTenant: false } } }],
+        });
+      }
     }
 
     // ── 2. Time Range Filters ──
@@ -83,7 +97,7 @@ export async function getAuditLogs(filters?: {
         const from = new Date(filters.dateFrom);
         const to = new Date(filters.dateTo);
         to.setHours(23, 59, 59, 999);
-        whereClause.createdAt = { gte: from, lte: to };
+        andConditions.push({ createdAt: { gte: from, lte: to } });
       } else if (filters.timeRange !== "custom") {
         const now = new Date();
         let threshold = new Date();
@@ -93,7 +107,7 @@ export async function getAuditLogs(filters?: {
         else if (filters.timeRange === "90d")
           threshold.setDate(now.getDate() - 90);
 
-        whereClause.createdAt = { gte: threshold };
+        andConditions.push({ createdAt: { gte: threshold } });
       }
     }
 
@@ -101,39 +115,56 @@ export async function getAuditLogs(filters?: {
     if (filters?.action && filters.action !== "all") {
       const f = filters.action;
       if (f === "upload")
-        whereClause.action = { contains: "upload", mode: "insensitive" };
+        andConditions.push({
+          action: { contains: "upload", mode: "insensitive" },
+        });
       else if (f === "download")
-        whereClause.action = { contains: "download", mode: "insensitive" };
+        andConditions.push({
+          action: { contains: "download", mode: "insensitive" },
+        });
       else if (f === "delete") {
-        whereClause.OR = [
-          ...(whereClause.OR || []),
-          { action: { contains: "delete", mode: "insensitive" } },
-          { action: { contains: "remove", mode: "insensitive" } },
-        ];
+        andConditions.push({
+          OR: [
+            { action: { contains: "delete", mode: "insensitive" } },
+            { action: { contains: "remove", mode: "insensitive" } },
+          ],
+        });
       } else if (f === "share") {
-        whereClause.OR = [
-          ...(whereClause.OR || []),
-          { action: { contains: "share", mode: "insensitive" } },
-          { action: { contains: "permission", mode: "insensitive" } },
-        ];
+        andConditions.push({
+          OR: [
+            { action: { contains: "share", mode: "insensitive" } },
+            { action: { contains: "permission", mode: "insensitive" } },
+          ],
+        });
       } else if (f === "create_bucket")
-        whereClause.action = { contains: "create", mode: "insensitive" };
+        andConditions.push({
+          action: { contains: "create", mode: "insensitive" },
+        });
       else if (f === "invite_user") {
-        whereClause.OR = [
-          ...(whereClause.OR || []),
-          { action: { contains: "team", mode: "insensitive" } },
-          { action: { contains: "login", mode: "insensitive" } },
-        ];
+        andConditions.push({
+          OR: [
+            { action: { contains: "team", mode: "insensitive" } },
+            { action: { contains: "login", mode: "insensitive" } },
+          ],
+        });
       } else if (f === "modify")
-        whereClause.action = { contains: "modify", mode: "insensitive" };
+        andConditions.push({
+          action: { contains: "modify", mode: "insensitive" },
+        });
       else if (f === "sync")
-        whereClause.action = { contains: "sync", mode: "insensitive" };
+        andConditions.push({
+          action: { contains: "sync", mode: "insensitive" },
+        });
       else if (f === "view")
-        whereClause.action = { contains: "view", mode: "insensitive" };
+        andConditions.push({
+          action: { contains: "view", mode: "insensitive" },
+        });
       else {
-        whereClause.action = f;
+        andConditions.push({ action: f });
       }
     }
+
+    const whereClause = andConditions.length > 0 ? { AND: andConditions } : {};
 
     // ── DB Query execution ──
     const [totalCount, dbLogs] = await Promise.all([
@@ -207,9 +238,20 @@ export async function getAuditLogs(filters?: {
 const COST_PER_GB = 0.023; // $0.023 per GB/month (standard S3 rate)
 
 // Helper: resolve which bucket IDs the user is allowed to see
-async function getAllowedBucketIds(user: any): Promise<string[] | null> {
-  // null means "all buckets" (admin shortcut)
-  if (user.role === Role.PLATFORM_ADMIN) return null;
+async function getAllowedBucketIds(
+  user: AuthenticatedUser,
+): Promise<string[] | null> {
+  // null means "all buckets" (admin shortcut) — but only if NOT restricted to a tenant
+  if (user.role === Role.PLATFORM_ADMIN) {
+    if (user.activeTenantId) {
+      const tenantBuckets = await prisma.bucket.findMany({
+        where: { tenantId: user.activeTenantId },
+        select: { id: true },
+      });
+      return tenantBuckets.map((b) => b.id);
+    }
+    return null;
+  }
 
   if (user.role === Role.TENANT_ADMIN) {
     const tenantBuckets = await prisma.bucket.findMany({

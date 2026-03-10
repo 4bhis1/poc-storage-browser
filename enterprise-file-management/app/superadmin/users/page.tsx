@@ -12,9 +12,8 @@ interface UserRow {
   id: string;
   email: string;
   name: string | null;
-  role: string;
-  tenantId: string | null;
-  tenant?: { name: string } | null;
+  roles: string[];
+  tenantsCount: number;
   isActive: boolean;
   createdAt: string;
 }
@@ -69,8 +68,8 @@ export default function UsersPage() {
           <TableHeader>
             <TableRow>
               <TableHead>User</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Tenant</TableHead>
+              <TableHead>Roles</TableHead>
+              <TableHead>Tenant Access</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Joined</TableHead>
             </TableRow>
@@ -102,11 +101,19 @@ export default function UsersPage() {
                   </div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={ROLE_VARIANT[u.role] ?? 'outline'} className="text-xs">
-                    {u.role.replace(/_/g, ' ')}
+                  <div className="flex flex-wrap gap-1 max-w-[200px]">
+                    {u.roles.map(r => (
+                      <Badge key={r} variant={ROLE_VARIANT[r] ?? 'outline'} className="text-[10px] px-1.5 py-0 h-4 uppercase tracking-wider">
+                        {r.replace(/_/g, ' ')}
+                      </Badge>
+                    ))}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <Badge variant="secondary" className="gap-1 font-medium">
+                    {u.tenantsCount} {u.tenantsCount === 1 ? 'Tenant' : 'Tenants'}
                   </Badge>
                 </TableCell>
-                <TableCell className="text-sm">{u.tenant?.name ?? <span className="text-muted-foreground text-xs">—</span>}</TableCell>
                 <TableCell>
                   <span className={`text-xs font-medium ${u.isActive ? 'text-emerald-600' : 'text-slate-400'}`}>
                     {u.isActive ? 'Active' : 'Inactive'}

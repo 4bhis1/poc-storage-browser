@@ -34,7 +34,7 @@ interface UserDetail {
   tenant?: { name: string } | null;
 }
 
-const ROLES: Role[] = ['TEAMMATE', 'TEAM_ADMIN', 'TENANT_ADMIN', 'PLATFORM_ADMIN'];
+const ROLES: Role[] = ['TEAMMATE', 'TENANT_ADMIN'];
 
 export default function UserDetailPage() {
   const { userId } = useParams<{ userId: string }>();
@@ -271,7 +271,7 @@ export default function UserDetailPage() {
           {availableTenants.length > 0 && (
             <div className="border rounded-lg p-4 space-y-3">
               <p className="text-sm font-medium flex items-center gap-2">
-                <Plus className="h-4 w-4" /> Add Tenant Access
+                Add Tenant Access
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
                 <div className="space-y-1">

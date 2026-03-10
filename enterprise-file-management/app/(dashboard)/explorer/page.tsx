@@ -54,6 +54,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@/components/ui/pagination"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
 
 // Extended type based on API response
 export type FileType = "folder" | "pdf" | "image" | "document" | "spreadsheet" | "archive" | "video" | "audio" | "code" | "other"
@@ -96,7 +97,7 @@ const fileTypeFilters: FileType[] = [
 ]
 
 export default function ExplorerPage() {
-  const { user } = useAuth()
+  const { user, activeTenantId } = useAuth()
   const [query, setQuery] = React.useState("")
   const [activeFilters, setActiveFilters] = React.useState<Set<FileType>>(new Set())
   const [files, setFiles] = React.useState<ApiFileItem[]>([])
@@ -110,6 +111,7 @@ export default function ExplorerPage() {
   
   const [selectedFile, setSelectedFile] = React.useState<ApiFileItem | null>(null)
   const [viewerOpen, setViewerOpen] = React.useState(false)
+  const [dateRange, setDateRange] = React.useState<{ from?: Date; to?: Date }>({})
 
   React.useEffect(() => {
     const fetchTeammates = async () => {
@@ -126,7 +128,7 @@ export default function ExplorerPage() {
     fetchTeammates()
   }, [])
 
-  const fetchFiles = React.useCallback(async (pageNum: number, searchQuery: string, filters: Set<FileType>, creatorId: string) => {
+  const fetchFiles = React.useCallback(async (pageNum: number, searchQuery: string, filters: Set<FileType>, creatorId: string, range: { from?: Date; to?: Date }) => {
     try {
       setLoading(true)
       
@@ -144,6 +146,9 @@ export default function ExplorerPage() {
 
       url.searchParams.append('page', pageNum.toString())
       url.searchParams.append('limit', '10')
+      
+      if (range.from) url.searchParams.append('dateFrom', range.from.toISOString())
+      if (range.to) url.searchParams.append('dateTo', range.to.toISOString())
       
       const res = await fetchWithAuth(url.toString())
       if (res.ok) {
@@ -172,11 +177,11 @@ export default function ExplorerPage() {
   React.useEffect(() => {
     if (debounceTimeout) clearTimeout(debounceTimeout)
     const timeout = setTimeout(() => {
-      fetchFiles(page, query, activeFilters, filterCreator)
+      fetchFiles(page, query, activeFilters, filterCreator, dateRange)
     }, 300)
     setDebounceTimeout(timeout)
     return () => clearTimeout(timeout)
-  }, [page, query, activeFilters, filterCreator, fetchFiles])
+  }, [page, query, activeFilters, filterCreator, dateRange, activeTenantId, fetchFiles])
 
   const toggleFilter = (type: FileType) => {
     setActiveFilters((prev) => {
@@ -207,7 +212,7 @@ export default function ExplorerPage() {
           size="sm"
           className="h-9"
           disabled={loading}
-          onClick={() => fetchFiles(page, query, activeFilters, filterCreator)}
+          onClick={() => fetchFiles(page, query, activeFilters, filterCreator, dateRange)}
         >
           <RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -262,6 +267,16 @@ export default function ExplorerPage() {
                 </SelectContent>
               </Select>
             </div>
+            <Separator orientation="vertical" className="h-6 hidden sm:block" />
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground mr-1">Date:</span>
+              <DateRangePicker 
+                dateRange={dateRange} 
+                onDateRangeChange={setDateRange} 
+                placeholder="All time"
+              />
+            </div>
             
             <Separator orientation="vertical" className="h-6 hidden sm:block" />
 
@@ -285,6 +300,7 @@ export default function ExplorerPage() {
                   onClick={() => {
                     setActiveFilters(new Set())
                     setFilterCreator("ALL")
+                    setDateRange({})
                     setPage(1)
                   }}
                 >

@@ -173,13 +173,13 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
 
   const currentParentId = path.length > 0 ? path[path.length - 1].id : null
 
-  const fetchFiles = React.useCallback(async () => {
+  const fetchFiles = React.useCallback(async (isBackground = false) => {
     if (!bucketId) {
       setFiles([])
-      setLoading(false)
+      if (!isBackground) setLoading(false)
       return
     }
-    setLoading(true)
+    if (!isBackground) setLoading(true)
     try {
       const params = new URLSearchParams()
       params.append('bucketId', bucketId)
@@ -203,12 +203,12 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
           setPagination(null)
         }
       } else {
-        toast.error("Failed to fetch files")
+        if (!isBackground) toast.error("Failed to fetch files")
       }
     } catch (error) {
-      toast.error("Failed to fetch files")
+      if (!isBackground) toast.error("Failed to fetch files")
     } finally {
-      setLoading(false)
+      if (!isBackground) setLoading(false)
     }
   }, [bucketId, currentParentId, searchQuery, page, limit, sortKey, sortOrder, dateRange])
 
@@ -226,6 +226,17 @@ export function FileBrowser({ bucketId, onUploadClick, onNewFolderClick, path, s
     fetchFiles()
     setSelected(new Set())
   }, [fetchFiles, refreshTrigger, searchQuery, page, sortKey, sortOrder])
+
+  // Background Auto-Refresh every 5 seconds when in a bucket
+  React.useEffect(() => {
+    if (!bucketId) return;
+
+    const interval = setInterval(() => {
+      fetchFiles(true);
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [fetchFiles, bucketId]);
 
   // Sorting
   const currentFiles = files; // Sorting is now done on the backend

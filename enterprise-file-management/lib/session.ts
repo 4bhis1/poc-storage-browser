@@ -13,7 +13,9 @@ export type AuthenticatedUser = NonNullable<
   Awaited<
     ReturnType<typeof prisma.user.findFirst<{ include: typeof USER_INCLUDE }>>
   >
->;
+> & {
+  activeTenantId?: string;
+};
 
 // 2.1: Accept optional activeTenantId parameter
 export async function getCurrentUser(
@@ -68,12 +70,20 @@ export async function getCurrentUser(
         include: USER_INCLUDE,
       });
 
-      return syncCognitoSub(newUser, payload, email);
+      const user = await syncCognitoSub(newUser, payload, email);
+      if (user) {
+        user.activeTenantId = resolvedActiveTenantId;
+      }
+      return user;
     }
 
     // 2.3: Single-row auto-select
     if (users.length === 1) {
-      return syncCognitoSub(users[0], payload, email);
+      const user = await syncCognitoSub(users[0], payload, email);
+      if (user) {
+        user.activeTenantId = resolvedActiveTenantId;
+      }
+      return user;
     }
 
     // 2.4: N rows — select by activeTenantId, fallback to first
@@ -82,11 +92,15 @@ export async function getCurrentUser(
         ? users.find((u) => u.tenantId === resolvedActiveTenantId)
         : undefined) ?? users[0];
 
-    return syncCognitoSub(
+    const user = await syncCognitoSub(
       activeUser,
       payload as Record<string, unknown>,
       email,
     );
+    if (user) {
+      user.activeTenantId = resolvedActiveTenantId;
+    }
+    return user;
   } catch (error) {
     console.error("Session DB Error", error);
     throw error;
@@ -98,16 +112,17 @@ async function syncCognitoSub(
   user: AuthenticatedUser,
   payload: Record<string, unknown>,
   email: string,
-) {
+): Promise<AuthenticatedUser | null> {
   if (!user) return null;
 
   const tokenSub = payload["sub"] as string | undefined;
   if (tokenSub && user.cognitoSub !== tokenSub) {
-    return prisma.user.update({
+    const updated = await prisma.user.update({
       where: { id: user.id },
       data: { cognitoSub: tokenSub },
       include: USER_INCLUDE,
     });
+    return updated as AuthenticatedUser;
   }
 
   return user;

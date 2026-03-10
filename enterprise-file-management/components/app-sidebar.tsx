@@ -114,7 +114,12 @@ export function AppSidebar({ serverUser }: { serverUser?: SidebarUser }) {
       if (group.title === "Collaboration") {
         return {
           ...group,
-          items: group.items.filter(item => item.title !== "Users" && item.title !== "Teams")
+          items: group.items.filter(
+            (item) =>
+              item.title !== "Users" &&
+              item.title !== "Teams" &&
+              item.title !== "Service Accounts",
+          ),
         };
       }
       return group;
