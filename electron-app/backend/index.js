@@ -78,7 +78,11 @@ class BackendCentral {
         // 1. Check custom sync mappings
         const mappingRes = await this.db.query('SELECT "localPath", "bucketId", "configId" FROM "SyncMapping"');
         for (const mapping of mappingRes.rows) {
-            if (localPath.startsWith(mapping.localPath)) {
+            // Normalize base path with trailing sep to prevent prefix false-matches
+            const normalizedBase = mapping.localPath.endsWith(path.sep)
+                ? mapping.localPath
+                : mapping.localPath + path.sep;
+            if (localPath.startsWith(normalizedBase)) {
                 const relative = path.relative(mapping.localPath, localPath);
                 if (relative && !relative.startsWith('..') && !path.isAbsolute(relative)) {
                     const s3Key = relative.split(path.sep).join('/');

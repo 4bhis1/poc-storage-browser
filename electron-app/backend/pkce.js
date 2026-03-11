@@ -76,11 +76,11 @@ async function startLoopbackServer() {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(`<!DOCTYPE html>
 <html>
-<head><meta charset="utf-8"><title>CloudVault — Auth Complete</title></head>
+<head><meta charset="utf-8"><title>Datadock-Porter — Auth Complete</title></head>
 <body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0f172a;color:#94a3b8">
   <div style="text-align:center">
     <p style="font-size:1.5rem;color:#22c55e;margin-bottom:0.5rem">✓ Authentication complete</p>
-    <p style="font-size:0.875rem">You can close this tab and return to CloudVault.</p>
+    <p style="font-size:0.875rem">You can close this tab and return to Datadock.</p>
   </div>
 </body>
 </html>`);

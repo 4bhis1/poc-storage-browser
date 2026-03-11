@@ -333,7 +333,7 @@ export default function LoginPage() {
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-3 text-sm text-slate-600">
                 <div className="flex items-start gap-3">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">1</span>
-                    <span>Click the button below — your browser will open to the CloudVault login page.</span>
+                    <span>Click the button below — your browser will open to the Datadock login page.</span>
                 </div>
                 <div className="flex items-start gap-3">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">2</span>
@@ -341,7 +341,7 @@ export default function LoginPage() {
                 </div>
                 <div className="flex items-start gap-3">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center text-xs font-bold">3</span>
-                    <span>You'll be redirected back to CloudVault automatically.</span>
+                    <span>You'll be redirected back to Datadock automatically.</span>
                 </div>
             </div>
 
@@ -390,7 +390,7 @@ export default function LoginPage() {
                         <p className="font-medium">Register in Web Dashboard</p>
                         <ol className="list-decimal list-inside space-y-1 text-xs">
                             <li>Copy the public key below.</li>
-                            <li>Go to the CloudVault web dashboard → Service Accounts → Create Account.</li>
+                            <li>Go to the Datadock web dashboard → Service Accounts → Create Account.</li>
                             <li>Paste the public key and set permissions.</li>
                             <li>Copy the Service Account ID you receive and paste it below.</li>
                         </ol>
@@ -461,7 +461,7 @@ export default function LoginPage() {
     ];
 
     const cardTitleMap = {
-        login: pwMode === 'login' ? 'CloudVault Agent' :
+        login: pwMode === 'login' ? 'Datadock Agent' :
                pwMode === 'new_password' ? 'Set New Password' :
                pwMode === 'forgot_password' ? 'Reset Password' : 'Confirm New Password',
         sso:   'Browser SSO Login',

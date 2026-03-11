@@ -92,6 +92,15 @@ class AuthManager {
     s.set('email',        result.email        || result.username || '');
     console.log('[AuthManager] Tokens saved to store for:', s.get('email'));
     this._scheduleRefresh(result.idToken);
+
+    // Clear stale AWS credential cache on every login to prevent
+    // cross-user credential leakage (fixes 403 errors after re-login)
+    try {
+      const credentialManager = require('./aws-credentials');
+      credentialManager.clear();
+    } catch (e) {
+      console.warn('[AuthManager] Could not clear credential cache on login:', e.message);
+    }
   }
   /**
    * Use the stored refreshToken to get a new accessToken + idToken from Cognito.

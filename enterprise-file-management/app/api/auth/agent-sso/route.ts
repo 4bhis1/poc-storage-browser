@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Legacy deep-link fallback (no PKCE params) ────────────────────────────
-  const deepLink = new URL('cloudvault://auth');
+  const deepLink = new URL('porter://auth');
   deepLink.searchParams.set('token', idToken);
   if (refreshToken) deepLink.searchParams.set('refresh', refreshToken);
 
@@ -88,12 +88,12 @@ export async function GET(request: NextRequest) {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Redirecting to CloudVault Agent…</title>
+  <title>Redirecting to Porter</title>
   <script>window.location.href = ${JSON.stringify(deepLink.toString())};</script>
 </head>
 <body style="font-family:system-ui;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#0f172a;color:#94a3b8">
   <div style="text-align:center">
-    <p style="font-size:1.25rem;margin-bottom:0.5rem">Redirecting to CloudVault Agent…</p>
+    <p style="font-size:1.25rem;margin-bottom:0.5rem">Redirecting to Porter</p>
     <p style="font-size:0.875rem">If the app does not open automatically,
     <a href="${deepLink.toString()}" style="color:#3b82f6">click here</a>.</p>
   </div>

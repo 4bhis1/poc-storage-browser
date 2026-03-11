@@ -264,7 +264,7 @@ export default function DashboardPage() {
           </div>
           <div className="flex-1 min-w-0">
             <p className="text-white font-bold text-base truncate">
-              {user?.name || user?.email || 'CloudVault Agent'}
+              {user?.name || user?.email || 'Datadock Agent'}
             </p>
             <p className="text-slate-400 text-xs mt-0.5 truncate">{user?.email || 'Logged in'}</p>
           </div>

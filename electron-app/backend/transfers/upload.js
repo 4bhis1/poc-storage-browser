@@ -47,7 +47,7 @@ class UploadManager {
         if (stat.size >= MULTIPART_THRESHOLD) {
             await this._uploadMultipart(bucketId, accountId, filePath, bucketName, s3Key, contentType, stat, region, credentialManager, authManager);
         } else {
-            await this._uploadSimple(bucketId, accountId, filePath, bucketName, s3Key, contentType, stat, region, credentialManager);
+            await this._uploadSimple(bucketId, accountId, filePath, bucketName, s3Key, contentType, stat, region, credentialManager, authManager);
         }
     }
 
@@ -56,7 +56,7 @@ class UploadManager {
     // Persists intent so the queue can retry after a crash.
     // ─────────────────────────────────────────────────────────────────────────
 
-    async _uploadSimple(bucketId, accountId, filePath, bucketName, s3Key, contentType, stat, region, credentialManager) {
+    async _uploadSimple(bucketId, accountId, filePath, bucketName, s3Key, contentType, stat, region, credentialManager, authManager) {
         const fileName = path.basename(filePath);
         const transferId = `ul-${Date.now()}-${fileName}`;
         const stateId = `ul-simple-${bucketId}-${Buffer.from(s3Key).toString('base64')}`;
@@ -247,34 +247,24 @@ class UploadManager {
                         await fd.read(buffer, 0, chunkSize, start);
                         await fd.close();
 
-                        // Stream the buffer through a PassThrough so we get
-                        // byte-level progress within each part
-                        const { PassThrough } = require('stream');
-                        const partStream = new PassThrough();
-                        let partUploaded = 0;
+                        // Pass buffer directly — AWS SDK v3 cannot hash a pre-ended
+                        // PassThrough stream. Progress is updated per-part on completion.
                         const alreadyDone = completedParts.length * partSize;
-
-                        partStream.on('data', (chunk) => {
-                            partUploaded += chunk.length;
-                            const chunkPct = Math.min(100, (partUploaded / chunkSize) * 100);
-                            statusManager.updateChunk(transferId, partNumber, 'active', chunkPct);
-                            // Overall progress: completed parts bytes + current part bytes
-                            const totalLoaded = alreadyDone + partUploaded;
-                            const overallPct = Math.min(99, (totalLoaded / stat.size) * 100);
-                            statusManager.updateProgress(transferId, overallPct, totalLoaded);
-                        });
-
-                        // Push buffer into stream
-                        partStream.end(buffer);
 
                         const result = await s3.send(new UploadPartCommand({
                             Bucket: bucketName,
                             Key: s3Key,
                             UploadId: uploadId,
                             PartNumber: partNumber,
-                            Body: partStream,
+                            Body: buffer,
                             ContentLength: chunkSize,
                         }));
+
+                        // Update progress after successful part upload
+                        const totalLoaded = alreadyDone + chunkSize;
+                        const overallPct = Math.min(99, (totalLoaded / stat.size) * 100);
+                        statusManager.updateProgress(transferId, overallPct, totalLoaded);
+                        statusManager.updateChunk(transferId, partNumber, 'active', 100);
 
                         const etag = result.ETag?.replace(/"/g, '');
                         if (!etag) throw new Error(`No ETag returned for part ${partNumber}`);

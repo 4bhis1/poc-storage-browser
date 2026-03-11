@@ -35,7 +35,7 @@ process.on('unhandledRejection', (reason) => {
  * persist the tokens, and notify the renderer so it can update the UI.
  */
 function handleDeepLink(url) {
-  if (!url || !url.startsWith('cloudvault://')) return;
+  if (!url || !url.startsWith('porter://')) return;
   try {
     const parsed = new URL(url);
     const idToken      = parsed.searchParams.get('token');
@@ -212,15 +212,25 @@ app.whenReady().then(async () => {
    */
   async function getZipMapping(filePath) {
     try {
+      // Only match UPLOAD configs with watcher enabled AND shouldZip=1
       const mappings = await backend.db.query(
-        'SELECT m."localPath", m."bucketId", m."shouldZip" FROM "SyncMapping" m WHERE m."shouldZip" = 1'
+        `SELECT m."localPath", m."bucketId", m."shouldZip"
+         FROM "SyncMapping" m
+         JOIN "SyncConfig" c ON m."configId" = c.id
+         WHERE m."shouldZip" = 1
+           AND c."direction" = 'UPLOAD'
+           AND c."useWatcher" = 1
+           AND c."isActive" = 1`
       );
       for (const mapping of mappings.rows) {
-        if (filePath.startsWith(mapping.localPath)) {
-          // This file is inside a zip-mapped source folder
+        // Normalize: ensure localPath ends with separator for exact prefix match
+        const normalizedBase = mapping.localPath.endsWith(path.sep)
+          ? mapping.localPath
+          : mapping.localPath + path.sep;
+        // File must be INSIDE the folder, not just share a prefix string
+        if (filePath.startsWith(normalizedBase) || filePath === mapping.localPath) {
           const folderName = path.basename(mapping.localPath);
           const zipName = `${folderName}.zip`;
-          // destDir is the parent of the source folder (where zip will be written)
           const destDir = path.dirname(mapping.localPath);
           return {
             shouldZip: true,
@@ -291,7 +301,14 @@ app.whenReady().then(async () => {
 
       uploadInProgress.add(filePath);
       try {
-        await backend.onLocalFileAdded(filePath, ROOT_PATH);
+        // If this file is inside a zip-mapped folder, debounce a re-zip instead of raw upload
+        const zipMapping = await getZipMapping(filePath);
+        if (zipMapping) {
+          console.log(`[Watcher] New file in zip-mapped folder, debouncing re-zip: ${path.basename(filePath)}`);
+          await handleZipSourceChange(zipMapping);
+        } else {
+          await backend.onLocalFileAdded(filePath, ROOT_PATH);
+        }
       } catch(e) {
         console.error('[Watcher] Upload error:', e.message);
       } finally {

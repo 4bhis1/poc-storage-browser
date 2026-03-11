@@ -163,7 +163,7 @@ export function AppSidebar({ serverUser }: { serverUser?: SidebarUser }) {
                     <Cloud className="h-4 w-4" />
                   </div>
                   <div className="flex flex-col gap-0.5 leading-none">
-                    <span className="font-semibold">CloudVault</span>
+                    <span className="font-semibold">Datadock</span>
                     <span className="text-xs text-muted-foreground">
                       {user.tenantName || "Enterprise"}
                     </span>

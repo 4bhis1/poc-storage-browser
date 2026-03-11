@@ -81,9 +81,10 @@ class HeartbeatManager {
       const latencyMs = Date.now() - startTime;
       serverTime = response.headers['date'] || response.data?.serverTime || new Date().toISOString();
       
-      // Log successful heartbeat
+      // Log successful heartbeat — use local machine time for display, server time for reference
+      const localTime = new Date().toISOString();
       console.log(`[Heartbeat] ✓ OK — ${latencyMs}ms (server: ${serverTime})`);
-      await this._logHeartbeat('SUCCESS', latencyMs, null, serverTime);
+      await this._logHeartbeat('SUCCESS', latencyMs, null, localTime);
       this._emitStatus('SUCCESS', latencyMs, serverTime);
       
     } catch (err) {

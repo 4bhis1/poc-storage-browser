@@ -104,9 +104,10 @@ const TopBar = () => {
             {/* Logo area */}
             <div className="w-64 shrink-0 flex items-center px-1 cursor-pointer" onClick={() => navigate('/')}>
                 <div className="p-1 px-1.5 rounded-lg text-slate-800 mr-1.5 flex items-center justify-center">
-                    <Cloud size={28} strokeWidth={2.5} fill="currentColor" stroke="none" className="text-blue-500"/>
+                    {/* <Cloud size={28} strokeWidth={2.5} fill="currentColor" stroke="none" className="text-blue-500"/> */}
+                    <img src="./build-resources/icon.png" height={56} width={56} strokeWidth={2.5} fill="currentColor" stroke="none" />
                 </div>
-                <span className="text-[22px] font-normal text-slate-700 tracking-tight">Cloud<span className="font-semibold text-slate-800">Vault</span></span>
+                <span className="text-[22px] font-normal text-slate-700 tracking-tight">Porter</span>
             </div>
 
             {/* Search */}

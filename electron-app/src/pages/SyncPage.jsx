@@ -281,15 +281,28 @@ export default function SyncPage() {
                                                     <h3 className="font-semibold text-slate-900 text-base">{config.name}</h3>
                                                     <div className="flex items-center gap-2 mt-0.5">
                                                         <p className="text-xs text-slate-500 flex items-center gap-1">
-                                                            <Clock className="h-3 w-3" /> Every {config.intervalMinutes}m
+                                                            {isUpload && watcherActive
+                                                                ? <Eye className="h-3 w-3 text-blue-500" />
+                                                                : <Clock className="h-3 w-3" />
+                                                            }
+                                                            {isUpload && watcherActive
+                                                                ? 'Watcher'
+                                                                : `Every ${config.intervalMinutes}m`
+                                                            }
                                                         </p>
                                                         <span className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide uppercase ${isUpload ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'}`}>
                                                             {isUpload ? '⬆ Upload' : '⬇ Download'}
                                                         </span>
+                                                        {isUpload && !watcherActive && (
+                                                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-500">
+                                                                <Clock className="h-2.5 w-2.5" />
+                                                                Cron
+                                                            </span>
+                                                        )}
                                                         {watcherActive && (
                                                             <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 text-blue-600">
                                                                 <span className="h-1.5 w-1.5 rounded-full bg-blue-500 animate-pulse" />
-                                                                Watcher
+                                                                Live
                                                             </span>
                                                         )}
                                                         {config.mappings?.some(m => m.shouldZip) && (

@@ -17,8 +17,11 @@ const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 const manrope = Manrope({ subsets: ['latin'], variable: '--font-manrope' });
 
 export const metadata: Metadata = {
-  title: 'CloudVault - Enterprise File Management',
+  title: 'Datadock - Enterprise File Management',
   description: 'Secure multi-tenant file management powered by S3',
+  icons: {
+    icon: '/favicon.ico',
+  },
 }
 
 // Hardcoded SSR defaults — actual preferences are loaded from localStorage on the client

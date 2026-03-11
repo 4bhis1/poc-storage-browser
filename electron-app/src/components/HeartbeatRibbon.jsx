@@ -7,9 +7,8 @@ import { Activity, Wifi, WifiOff } from 'lucide-react';
  * Color coding: green (< 200ms), yellow (200-500ms), red (failed), gray (no data)
  */
 export default function HeartbeatRibbon({ logs, currentStatus }) {
-  // SQLite datetime('now') stores UTC without a 'Z' suffix — append it so
-  // JS Date parses it as UTC instead of local time.
-  const parseUTC = (ts) => new Date(ts?.endsWith('Z') ? ts : ts + 'Z').getTime();
+  // Timestamps are stored as local ISO strings (with offset or Z) — parse directly
+  const parseUTC = (ts) => ts ? new Date(ts).getTime() : 0;
 
   // Group logs into 1-minute buckets (60 total)
   const now = Date.now();
@@ -60,11 +59,11 @@ export default function HeartbeatRibbon({ logs, currentStatus }) {
 
   function formatTime(timestamp) {
     if (!timestamp) return 'Never';
-    const date = new Date(timestamp?.endsWith?.('Z') ? timestamp : timestamp + 'Z');
+    const date = new Date(timestamp);
     const diff = Math.floor((Date.now() - date.getTime()) / 1000);
     if (diff < 60) return `${diff}s ago`;
     if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    return date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+    return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
   }
 
   return (

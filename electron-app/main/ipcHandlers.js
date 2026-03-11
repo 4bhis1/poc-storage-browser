@@ -146,35 +146,18 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
   ipcMain.handle("init-sync", async (event, token) => {
     const session = authManager.getSession();
     const userId = session?.email || session?.username || null;
-    const botId = botAuth.getBotId() || null;
 
-    // The /api/agent/sync endpoint requires a bot-issued token.
-    // If a bot identity exists, get a bot token for sync WITHOUT overwriting
-    // the SSO user's session in the auth store.
-    let syncToken = token;
-    if (botId && botAuth.hasKeyPair()) {
-      try {
-        const result = await botAuth.performHandshake(botId);
-        if (result?.accessToken) {
-          syncToken = result.accessToken;
-          console.log('[IPC] init-sync: obtained bot token for sync API (SSO session preserved)');
-        }
-      } catch (err) {
-        console.warn('[IPC] init-sync: bot handshake failed, using SSO token:', err.message);
-      }
-    }
-
+    // The token passed in IS the active identity's token — SSO or bot.
+    // No mixing. Whoever called initSync owns this session.
     const wasInitialized = backend.sync.init(
-      syncToken,
+      token,
       () => {
         if (mainWindow) mainWindow.webContents.send("auth-expired");
       },
       downloadingPaths,
       userId,
-      botId,
     );
 
-    // Only resume transfers on first init, not on duplicate calls
     if (wasInitialized) {
       setTimeout(() => {
         backend.queue.loadIncompleteTransfers().catch(e =>
@@ -205,36 +188,41 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
   // Awaitable initial bucket sync — called after login to populate local DB before UI needs it
   ipcMain.handle("sync-buckets-now", async () => {
     try {
-      // Ensure SyncManager has the current userId from the active session
-      // (guards against race where syncBucketsNow fires before initSync completes)
       const session = authManager.getSession();
       const _uid = session?.email || session?.username || null;
+      const _token = session?.idToken || session?.accessToken || null;
+
+      // Patch SyncManager with the freshest identity from the auth store
       if (_uid && backend.sync.userId !== _uid) {
         console.log(`[IPC] sync-buckets-now: patching stale userId (${backend.sync.userId}) → ${_uid}`);
         backend.sync.userId = _uid;
       }
-
-      // Fix orphaned rows from previous syncs where userId was NULL
-      if (_uid) {
-        const orphaned = backend.db.query('SELECT COUNT(*) as count FROM "Bucket" WHERE "userId" IS NULL');
-        const orphanCount = parseInt(orphaned.rows[0]?.count || 0);
-        if (orphanCount > 0) {
-          console.log(`[IPC] sync-buckets-now: adopting ${orphanCount} orphaned buckets for user ${_uid}`);
-          backend.db.query('UPDATE "Bucket" SET "userId" = $1 WHERE "userId" IS NULL', [_uid]);
-          backend.db.query('UPDATE "FileObject" SET "userId" = $1 WHERE "userId" IS NULL', [_uid]);
-          backend.db.query('UPDATE "Tenant" SET "userId" = $1 WHERE "userId" IS NULL', [_uid]);
-          backend.db.query('UPDATE "Account" SET "userId" = $1 WHERE "userId" IS NULL', [_uid]);
-        }
+      if (_token && backend.sync.authToken !== _token) {
+        console.log(`[IPC] sync-buckets-now: patching stale authToken`);
+        backend.sync.authToken = _token;
       }
 
-      // Clear incremental sync marker so syncAll does a FULL fetch (not incremental).
-      // This ensures we always get the complete bucket list from the server.
+      // Clear incremental sync marker so syncAll does a FULL fetch
       const kvKey = _uid ? `lastFullSyncAt:${_uid}` : 'lastFullSyncAt';
       try {
         backend.db.query('DELETE FROM "KVStore" WHERE key = $1', [kvKey]);
       } catch (e) { /* KVStore may not exist yet */ }
 
       await backend.sync.syncAll();
+
+      // AFTER successful sync: clean up orphaned rows (NULL userId) that belong
+      // to no user. We do this AFTER sync so we don't lose data if sync fails.
+      if (_uid) {
+        const orphaned = backend.db.query('SELECT COUNT(*) as count FROM "Bucket" WHERE "userId" IS NULL');
+        const orphanCount = parseInt(orphaned.rows[0]?.count || 0);
+        if (orphanCount > 0) {
+          console.log(`[IPC] sync-buckets-now: cleaning ${orphanCount} orphaned buckets (post-sync cleanup)`);
+          backend.db.query('DELETE FROM "FileObject" WHERE "userId" IS NULL');
+          backend.db.query('DELETE FROM "Bucket" WHERE "userId" IS NULL');
+          backend.db.query('DELETE FROM "Account" WHERE "userId" IS NULL');
+          backend.db.query('DELETE FROM "Tenant" WHERE "userId" IS NULL');
+        }
+      }
       const bucketCount = await backend.db.query(
         _uid
           ? 'SELECT COUNT(*) as count FROM "Bucket" WHERE "userId" = $1'
@@ -247,7 +235,9 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
       );
       return { success: true, bucketCount: count };
     } catch (err) {
-      console.error("[IPC] sync-buckets-now error:", err.message);
+
+      console.error("[IPC] sync-buckets-now error-message:", err.message);
+      console.error("[IPC] sync0bucket-now erro", err)
       return { success: false, error: err.message };
     }
   });
@@ -464,6 +454,13 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
             `INSERT INTO "SyncMapping" (id, "configId", "localPath", "bucketId", "shouldZip") VALUES ($1, $2, $3, $4, $5)`,
             [mapId, id, map.localPath, map.bucketId, map.shouldZip ? 1 : 0],
           );
+        }
+
+        // Re-register watcher paths for updated mappings
+        if (dir === "UPLOAD" && watcher && backend.sync.addWatcherPath) {
+          for (const map of mappings) {
+            backend.sync.addWatcherPath(map.localPath, true);
+          }
         }
 
         if (backend.sync.reloadConfigs) backend.sync.reloadConfigs();
@@ -715,6 +712,15 @@ function registerIpcHandlers(mainWindow, rootPath, downloadingPaths) {
   // Auto-login attempt on startup
   ipcMain.handle("bot:attempt-auto-login", async () => {
     try {
+      // If a valid SSO session exists, do NOT overwrite it with bot credentials.
+      // The renderer's AuthContext checks SSO first and only falls through to
+      // bot auto-login when there is no valid SSO session.
+      const existingSession = authManager.getSession();
+      if (existingSession?.accessToken && !authManager.isTokenExpired()) {
+        console.log("[IPC] bot:attempt-auto-login — valid SSO session exists, skipping bot auto-login");
+        return { success: false, reason: "sso_session_active" };
+      }
+
       if (!botAuth.hasKeyPair() || !botAuth.getBotId()) {
         return { success: false, reason: "no_credentials" };
       }

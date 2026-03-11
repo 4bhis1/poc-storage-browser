@@ -383,7 +383,7 @@ export default function BotDetailPage() {
               <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/30 p-4">
                 <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-2">How to get the public key:</p>
                 <ol className="list-decimal list-inside space-y-1.5 text-sm text-blue-700 dark:text-blue-400">
-                  <li>Open the CloudVault desktop agent</li>
+                  <li>Open the Datadock desktop agent</li>
                   <li>Navigate to Login → Bot tab</li>
                   <li>Click "Generate Key Pair"</li>
                   <li>Copy the public key displayed</li>

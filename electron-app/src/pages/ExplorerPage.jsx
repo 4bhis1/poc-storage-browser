@@ -55,7 +55,7 @@ const formatBytes = (bytes) => {
 const formatDate = (dateString) => {
   if (!dateString) return '--';
   const d = new Date(dateString);
-  return d.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric", hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Kolkata' });
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", hour: '2-digit', minute: '2-digit' });
 };
 
 const getFileType = (file) => {
@@ -65,9 +65,14 @@ const getFileType = (file) => {
   if (mime.startsWith('image/')) return 'image';
   if (mime.startsWith('video/')) return 'video';
   if (mime.startsWith('audio/')) return 'audio';
-  if (mime.includes('pdf')) return 'pdf';
-  if (mime.includes('zip') || mime.includes('rar') || mime.includes('archive') || name.endsWith('.zip') || name.endsWith('.rar') || name.endsWith('.tar') || name.endsWith('.gz')) return 'archive';
-  if (name.match(/\.(js|ts|jsx|tsx|py|go|rs|java|cpp|c|html|css|json|sh)$/)) return 'code';
+  if (mime.includes('pdf') || name.endsWith('.pdf')) return 'pdf';
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('archive') || mime.includes('tar') || mime.includes('gzip') ||
+      name.match(/\.(zip|rar|tar|gz|7z|bz2|xz)$/)) return 'archive';
+  if (mime.includes('spreadsheet') || mime.includes('excel') || mime.includes('csv') ||
+      name.match(/\.(xls|xlsx|csv|ods|numbers|tsv)$/)) return 'spreadsheet';
+  if (mime.includes('word') || mime.includes('document') || mime.includes('msword') || mime.includes('opendocument.text') ||
+      name.match(/\.(doc|docx|odt|rtf|txt|md|pages)$/)) return 'document';
+  if (name.match(/\.(js|ts|jsx|tsx|py|go|rs|java|cpp|c|h|html|css|json|sh|yaml|yml|xml|sql|php|rb|swift|kt)$/)) return 'code';
   return 'other';
 };
 

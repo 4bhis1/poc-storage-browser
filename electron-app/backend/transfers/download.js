@@ -8,6 +8,11 @@ const transferState = require('./transferState');
 const authManager = require('../auth');
 
 class DownloadManager {
+    constructor() {
+        // Tracks in-flight downloads by stateId to prevent duplicate concurrent downloads
+        this._inFlight = new Set();
+    }
+
     /**
      * Download from S3 using short-lived credentials, resuming from a partial
      * .part file if one exists.
@@ -19,23 +24,17 @@ class DownloadManager {
 
         // ── Determine resume offset ──────────────────────────────────────────
         let resumeOffset = 0;
-        if (stateId) {
-            const saved = transferState.getTransferState(stateId);
-            if (saved && saved.bytesTransferred > 0) {
-                // Validate the .part file on disk matches what we recorded
-                if (fs.existsSync(partPath)) {
-                    const partStat = fs.statSync(partPath);
-                    if (partStat.size === saved.bytesTransferred) {
-                        resumeOffset = saved.bytesTransferred;
-                        console.log(`[DownloadManager] Resuming ${fileName} from byte ${resumeOffset}`);
-                    } else {
-                        // Mismatch — corrupted partial file, restart
-                        console.warn(`[DownloadManager] Part file size mismatch for ${fileName}, restarting`);
-                        fs.unlinkSync(partPath);
-                        resumeOffset = 0;
-                    }
-                } else {
-                    resumeOffset = 0;
+        if (fs.existsSync(partPath)) {
+            const partStat = fs.statSync(partPath);
+            if (partStat.size > 0) {
+                // Trust the .part file on disk — it is the ground truth.
+                // The saved state may lag by up to 5MB (throttled persistence),
+                // so we always use the actual file size as the resume point.
+                resumeOffset = partStat.size;
+                console.log(`[DownloadManager] Resuming ${fileName} from byte ${resumeOffset} (part file)`);
+                // Sync the saved state to match reality
+                if (stateId) {
+                    transferState.updateTransferState(stateId, { bytesTransferred: resumeOffset });
                 }
             }
         }
@@ -69,6 +68,16 @@ class DownloadManager {
                 new GetObjectCommand(cmdParams),
                 { abortSignal: abortCtrl.signal }
             );
+
+            // If we got a Content-Range back (206 Partial), extract the real total size
+            // e.g. "bytes 500-999/1000" → totalSize = 1000
+            if (resumeOffset > 0 && data.ContentRange) {
+                const match = data.ContentRange.match(/\/(\d+)$/);
+                if (match) {
+                    const realTotal = parseInt(match[1], 10);
+                    if (realTotal > totalSize) totalSize = realTotal;
+                }
+            }
 
             let downloaded = resumeOffset;
 
@@ -219,18 +228,38 @@ class DownloadManager {
         // Deterministic state ID — same file + bucket always maps to same record
         const stateId = `dl-${bucketId}-${Buffer.from(s3Key).toString('base64')}`;
 
-        // Ensure a TransferState row exists (idempotent)
-        transferState.saveTransferState({
-            id: stateId,
-            type: 'download',
-            bucketId,
-            s3Key,
-            localPath,
-            totalSize,
-            userId: authManager.getCurrentUserId(),
-        });
+        // Guard: if this exact file is already downloading, skip
+        if (this._inFlight.has(stateId)) {
+            console.log(`[DownloadManager] Already in-flight, skipping duplicate: ${s3Key}`);
+            return true;
+        }
 
-        return await this.downloadFromS3(s3, name, s3Key, localPath, totalSize, stateId);
+        // If the file already exists locally and is complete (no .part file), skip entirely
+        const partPath = localPath + '.part';
+        const existingState = transferState.getTransferState(stateId);
+        if (fs.existsSync(localPath) && !fs.existsSync(partPath)) {
+            if (existingState) transferState.deleteTransferState(stateId);
+            console.log(`[DownloadManager] Skipping already-downloaded file: ${s3Key}`);
+            return true;
+        }
+
+        this._inFlight.add(stateId);
+        try {
+            // Ensure a TransferState row exists (idempotent)
+            transferState.saveTransferState({
+                id: stateId,
+                type: 'download',
+                bucketId,
+                s3Key,
+                localPath,
+                totalSize,
+                userId: authManager.getCurrentUserId(),
+            });
+
+            return await this.downloadFromS3(s3, name, s3Key, localPath, totalSize, stateId);
+        } finally {
+            this._inFlight.delete(stateId);
+        }
     }
 }
 

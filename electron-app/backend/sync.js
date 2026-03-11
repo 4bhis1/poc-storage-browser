@@ -23,9 +23,13 @@ class SyncManager {
         this.syncIntervalId = null;
         this.authToken = null;
         this.isSyncing = false;
+        this.isSyncingConfigs = false; // separate guard so uploads aren't blocked by slow syncAll
         this.onAuthExpired = null;
         this.userId = null;
         this.botId = null;
+        /** Generation counter — incremented on every init(). Stale cycles check this
+         *  to bail out early if a new identity has taken over mid-flight. */
+        this._generation = 0;
         /**
          * Shared reference to the Set in main.js.
          * Files added here are SKIPPED by the watcher's 'add' handler
@@ -48,11 +52,9 @@ class SyncManager {
             return false;
         }
 
-        // Stop previous cycle first
-        if (this.syncIntervalId) {
-            clearInterval(this.syncIntervalId);
-            this.syncIntervalId = null;
-        }
+        // Full stop: kill interval, abort any in-flight sync, reset state
+        this.stop();
+        this._generation++;
 
         this.authToken = token;
         this.onAuthExpired = onAuthExpired;
@@ -94,20 +96,26 @@ class SyncManager {
     async runSync() {
         if (this.isSyncing || !this.authToken) return;
         this.isSyncing = true;
+        const gen = this._generation;
 
         try {
             await this.syncAll();
+            // If identity changed mid-cycle, don't continue with stale context
+            if (gen !== this._generation) return;
             await this.syncConfigs();
         } catch (error) {
+            if (gen !== this._generation) return; // stale cycle, ignore errors
             console.error('[SyncManager] Cycle Error:', error.message);
             if (error.response?.status === 401) {
                 this.stop();
                 if (this.onAuthExpired) this.onAuthExpired();
             }
         } finally {
-            // Flush all buffered activities (downloads + skips from this cycle)
-            await syncHistory.flush();
-            this.isSyncing = false;
+            if (gen === this._generation) {
+                // Only flush/reset for the CURRENT generation
+                await syncHistory.flush();
+                this.isSyncing = false;
+            }
         }
     }
 
@@ -116,23 +124,29 @@ class SyncManager {
     // ─────────────────────────────────────────────────────────────────────────
 
     async syncAll() {
-        // Always use the freshest token from the auth store in case it was
-        // refreshed since init() was called (e.g. proactive Cognito refresh).
+        // Refresh userId AND token from auth store — ensures we always use the
+        // freshest identity, especially when called directly by sync-buckets-now
         try {
             const authManager = require('./auth');
-            const freshToken = authManager.getToken();
-            if (freshToken && freshToken !== this.authToken) {
-                console.log('[SyncManager] Refreshed auth token from store');
-                this.authToken = freshToken;
-            }
             const session = authManager.getSession();
             const freshUserId = session?.email || session?.username || null;
+            const freshToken = session?.idToken || session?.accessToken || null;
             if (freshUserId && freshUserId !== this.userId) {
                 console.log(`[SyncManager] Refreshed userId: ${this.userId} → ${freshUserId}`);
                 this.userId = freshUserId;
             }
+            if (freshToken && freshToken !== this.authToken) {
+                console.log(`[SyncManager] Refreshed authToken for user: ${freshUserId}`);
+                this.authToken = freshToken;
+            }
         } catch (err) {
-            console.warn('[SyncManager] Could not refresh token from auth store:', err.message);
+            console.warn('[SyncManager] Could not refresh userId from auth store:', err.message);
+        }
+
+        // Guard: refuse to sync without a userId — prevents orphaned rows
+        if (!this.userId) {
+            console.warn('[SyncManager] syncAll aborted — no userId available. Data would be orphaned.');
+            return;
         }
 
         // Build incremental sync param — use user-scoped KVStore key
@@ -149,9 +163,14 @@ class SyncManager {
         const lastSyncAt = lastSyncRow.rows[0]?.value || null;
 
         const params = lastSyncAt ? `?updatedSince=${encodeURIComponent(lastSyncAt)}` : '';
-        const response = await axios.get(`${API_URL}/agent/sync${params}`, {
-            headers: { Authorization: `Bearer ${this.authToken}` }
-        });
+        let response;
+        try {
+            response = await axios.get(`${API_URL}/agent/sync${params}`, {
+                headers: { Authorization: `Bearer ${this.authToken}` }
+            });
+        } catch (err) {
+            throw err;
+        }
 
         const { tenants, accounts, buckets, syncedAt } = response.data;
 

@@ -62,8 +62,12 @@ export const AuthProvider = ({ children }) => {
                 setToken(session.accessToken);
                 const decoded = _decodeUser(session.idToken || session.accessToken);
                 setUser({ ...decoded, email: session.email || decoded.email });
-                window.electronAPI.initSync?.(session.idToken || session.accessToken);
-                window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bucket sync failed:', e));
+                await window.electronAPI.initSync?.(session.idToken || session.accessToken);
+                try {
+                    await window.electronAPI.syncBucketsNow?.();
+                } catch (e) {
+                    console.warn('[AuthContext] Bucket sync failed:', e);
+                }
                 setLoading(false);
                 return;
             }
@@ -81,7 +85,7 @@ export const AuthProvider = ({ children }) => {
                     setToken(newToken);
                     const decoded = _decodeUser(newToken);
                     setUser({ ...decoded, email: session.email || decoded.email });
-                    window.electronAPI.initSync?.(newToken);
+                    await window.electronAPI.initSync?.(newToken);
                     window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bucket sync failed:', e));
                     setLoading(false);
                     return;
@@ -117,7 +121,7 @@ export const AuthProvider = ({ children }) => {
                         sub: autoLoginResult.botId 
                     });
                     
-                    window.electronAPI.initSync?.(autoLoginResult.accessToken);
+                    await window.electronAPI.initSync?.(autoLoginResult.accessToken);
                     window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Auto-login bucket sync failed:', e));
                     setLoading(false);
                     return;
@@ -139,19 +143,29 @@ export const AuthProvider = ({ children }) => {
         let cleanupExpired = null;
 
         if (window.electronAPI?.auth?.onSSOResult) {
-            cleanupSSO = window.electronAPI.auth.onSSOResult((data) => {
+            cleanupSSO = window.electronAPI.auth.onSSOResult(async (data) => {
                 console.log('[AuthContext] SSO result received — clearing any bot identity');
                 // Clear bot state — SSO user identity takes over
                 setIsBot(false);
                 setBotName(null);
                 setIsAutoLogin(false);
 
+                // Stop any existing sync cycle (e.g. from bot auto-login) BEFORE
+                // re-initializing with the SSO token. This prevents race conditions
+                // where the old identity's in-flight sync overlaps with the new one.
+                await window.electronAPI.stopSync?.();
+
                 setToken(data.idToken);
                 const decoded = _decodeUser(data.idToken);
                 setUser({ ...decoded, email: data.email || decoded.email });
-                window.electronAPI.initSync?.(data.idToken);
+                // Await initSync before syncing buckets to ensure token + userId are set
+                await window.electronAPI.initSync?.(data.idToken);
                 // Populate buckets before navigating
-                window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bucket sync failed:', e));
+                try {
+                    await window.electronAPI.syncBucketsNow?.();
+                } catch (e) {
+                    console.warn('[AuthContext] Bucket sync failed:', e);
+                }
                 navigate('/');
             });
         }
@@ -204,7 +218,7 @@ export const AuthProvider = ({ children }) => {
             setToken(result.accessToken);
             const decoded = _decodeUser(result.idToken || result.accessToken);
             setUser({ ...decoded, email: decoded.email || email });
-            window.electronAPI.initSync?.(result.idToken || result.accessToken);
+            await window.electronAPI.initSync?.(result.idToken || result.accessToken);
             // Populate buckets before navigating to dashboard
             try {
                 await window.electronAPI.syncBucketsNow?.();
@@ -237,7 +251,7 @@ export const AuthProvider = ({ children }) => {
             setRequiresNewPassword(false);
             setChallengeSession(null);
             setChallengeUsername(null);
-            window.electronAPI.initSync?.(result.idToken || result.accessToken);
+            await window.electronAPI.initSync?.(result.idToken || result.accessToken);
             // Populate buckets before navigating
             try {
                 await window.electronAPI.syncBucketsNow?.();
@@ -271,7 +285,7 @@ export const AuthProvider = ({ children }) => {
             } catch {}
             setBotName(resolvedBotName);
             setUser({ email: result.email, username: result.email, name: resolvedBotName, sub: botId });
-            window.electronAPI.initSync?.(result.accessToken);
+            await window.electronAPI.initSync?.(result.accessToken);
             navigate('/');
             window.electronAPI.syncBucketsNow?.().catch(e => console.warn('[AuthContext] Bot bucket sync failed (non-fatal):', e));
             return { success: true };

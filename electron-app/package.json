@@ -1,9 +1,9 @@
 {
-  "name": "cloudvault",
+  "name": "porter",
   "version": "1.0.0",
-  "description": "CloudVault — Enterprise S3 File Sync Agent",
-  "author": "CloudVault <support@cloudvault.app>",
-  "homepage": "https://cloudvault.app",
+  "description": "Porter — Enterprise S3 File Sync Agent",
+  "author": "Porter <support@cloudvault.app>",
+  "homepage": "https://uat-datadock.smcindiaonline.org/",
   "main": "main.js",
   "scripts": {
     "start": "electron .  --no-sandbox",
@@ -18,8 +18,8 @@
   },
   "build": {
     "appId": "com.cloudvault.agent",
-    "productName": "CloudVault",
-    "copyright": "Copyright © 2025 CloudVault",
+    "productName": "Porter",
+    "copyright": "Copyright © 2025 Porter",
     "directories": {
       "output": "release",
       "buildResources": "build-resources"
@@ -48,8 +48,8 @@
     ],
     "protocols": [
       {
-        "name": "CloudVault",
-        "schemes": ["cloudvault"]
+        "name": "Porter",
+        "schemes": ["porter"]
       }
     ],
     "win": {
@@ -66,7 +66,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "CloudVault"
+      "shortcutName": "Porter"
     },
     "mac": {
       "target": [
